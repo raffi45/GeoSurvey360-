@@ -1,0 +1,2174 @@
+<!DOCTYPE html>
+<html lang="id">
+<head>
+    <meta charset="UTF-8">
+    <title>Aplikasi Survei Aset Jaringan 360° (Full Width + Map Editor)</title>
+    <!-- Tailwind CSS -->
+    <script src="https://cdn.tailwindcss.com"></script>
+    <!-- ExcelJS untuk Export Excel (mendukung gambar di dalam sel) -->
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/exceljs/4.4.0/exceljs.min.js"></script>
+    <!-- Three.js untuk Render Video 360 Derajat -->
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+    <!-- Leaflet CSS & JS untuk Map Interaktif -->
+    <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
+    <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+
+    <style>
+        #viewer-360 {
+            width: 100%;
+            height: 520px;
+            background: #000;
+            border-radius: 0.375rem 0.375rem 0 0;
+            cursor: grab;
+            overflow: hidden;
+            position: relative;
+        }
+        #viewer-360:active {
+            cursor: grabbing;
+        }
+        #map-editor {
+            width: 100%;
+            height: 480px;
+            border-radius: 0.375rem;
+            z-index: 1;
+        }
+        /* Label nama aset di peta */
+        .leaflet-tooltip.map-label {
+            background: rgba(17, 24, 39, 0.85);
+            color: #fff;
+            border: none;
+            box-shadow: none;
+            font-size: 10px;
+            font-weight: 700;
+            padding: 1px 5px;
+            white-space: nowrap;
+        }
+        .leaflet-tooltip.map-label::before { display: none; }
+        .leaflet-tooltip.map-label-jtm { background: rgba(220, 38, 38, 0.9); }
+        .leaflet-tooltip.map-label-jtr { background: rgba(234, 88, 12, 0.9); font-weight: 600; }
+        .leaflet-tooltip.map-label-dist { font-size: 9px; padding: 0 4px; }
+    </style>
+</head>
+<body class="bg-gray-100 font-sans antialiased">
+
+    <div class="container mx-auto px-2 py-3 max-w-[98%]">
+        <header class="bg-slate-900 border-b border-slate-800 text-white px-6 py-4 mb-6 flex flex-col md:flex-row justify-between items-start md:items-center gap-4">
+            <div class="flex items-center gap-3">
+                <div class="p-2.5 bg-blue-600/20 border border-blue-500/30 rounded-xl text-blue-400">
+
+                    <svg class="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 20l-5.447-2.724A1 1 0 013 16.382V5.618a1 1 0 011.447-.894L9 7m0 13l6-3m-6 3V7m6 10l4.553 2.276A1 1 0 0021 18.382V7.618a1 1 0 00-.553-.894L15 4m0 13V4m0 0L9 7"></path>
+                    </svg>
+                </div>
+                <div>
+                    <div class="flex items-center gap-2">
+                        <h1 class="font-bold text-lg tracking-tight">GeoSurvey 360°</h1>
+                        <span class="px-2 py-0.5 text-[10px] font-semibold bg-slate-500/10 text-slate-300 border border-slate-500/30 rounded-full">Offline · Ekspor Excel</span>
+                    </div>
+                    <p class="text-xs text-slate-400">Spatial Video Sync & Pin Correction</p>
+                </div>
+            </div>
+
+            <div class="flex items-center gap-4 w-full md:w-auto justify-between md:justify-end border-t md:border-t-0 pt-3 md:pt-0 border-slate-800">
+                <!-- Status GPS -->
+                <div class="flex items-center gap-2 px-3 py-1.5 bg-slate-800/60 rounded-lg border border-slate-700/50 text-xs">
+                    <span id="gps-dot" class="w-2 h-2 rounded-full bg-slate-500"></span>
+                    <span class="text-slate-300 font-medium">GPS: <strong id="status-gps" class="text-white">Belum dimuat</strong></span>
+                </div>
+
+                <div class="text-xs text-slate-400 bg-slate-800/60 px-3 py-1.5 rounded-lg border border-slate-700/50">
+                    Sync: <span id="status-sync" class="text-slate-400 font-medium">Menunggu video & GPS</span>
+                </div>
+            </div>
+        </header>
+
+        <!-- PANEL UPLOAD FILE -->
+        <div class="grid grid-cols-1 md:grid-cols-4 gap-3 mb-3 bg-white p-3 rounded-lg shadow">
+            <div>
+                <label class="block text-xs font-bold text-gray-700 mb-1">1. File Video 360° (.mp4 H.264)</label>
+                <input type="file" id="upload-video" accept="video/*" class="w-full text-xs text-gray-500 file:mr-2 file:py-1 file:px-3 file:rounded file:border-0 file:text-xs file:font-semibold file:bg-blue-50 file:text-blue-700 hover:file:bg-blue-100"/>
+            </div>
+            <div>
+                <label class="block text-xs font-bold text-gray-700 mb-1">2. File Data GPS (.srt / .gpx)</label>
+                <input type="file" id="upload-gps" accept=".srt,.gpx" class="w-full text-xs text-gray-500 file:mr-2 file:py-1 file:px-3 file:rounded file:border-0 file:text-xs file:font-semibold file:bg-blue-50 file:text-blue-700 hover:file:bg-blue-100"/>
+            </div>
+            <div>
+                <label class="block text-xs font-bold text-gray-700 mb-1">3. File Kategori (.csv)</label>
+                <input type="file" id="upload-csv" accept=".csv" class="w-full text-xs text-gray-500 file:mr-2 file:py-1 file:px-3 file:rounded file:border-0 file:text-xs file:font-semibold file:bg-green-50 file:text-green-700 hover:file:bg-green-100"/>
+                <p class="text-[10px] text-gray-400 mt-0.5">Format: <code>JTM,TM-1</code> / <code>JTR,TR-1</code> per baris, atau 1 kolom untuk keduanya</p>
+            </div>
+            <div class="flex items-end">
+                <button onclick="loadDefaultCategories()" class="w-full bg-gray-200 hover:bg-gray-300 text-gray-800 text-xs font-bold py-2 px-3 rounded">
+                    Muat Kategori Bawaan (Opsional)
+                </button>
+            </div>
+        </div>
+
+        <div class="grid grid-cols-1 lg:grid-cols-12 gap-4">
+            
+            <!-- SISI KIRI: PEMUTAR VIDEO 360 + FORM -->
+            <div class="lg:col-span-6 bg-white p-3 rounded-lg shadow flex flex-col">
+                
+                <div id="viewer-360">
+                    <div id="placeholder-text" class="absolute inset-0 flex flex-col items-center justify-center text-gray-400 text-sm pointer-events-none text-center px-4">
+                        <p class="font-semibold">Silakan unggah file Video 360° (.mp)</p>
+                        <p class="text-xs mt-1">Klik & geser layar untuk memutar 360° • Scroll mouse untuk Zoom</p>
+                    </div>
+                </div>
+                
+                <video id="video-element" playsinline crossorigin="anonymous" style="display:none;"></video>
+
+                <div class="bg-gray-900 text-white p-2.5 rounded-b mb-3 flex items-center space-x-2 text-xs">
+                    <button id="btn-play-pause" onclick="togglePlay()" class="bg-blue-600 hover:bg-blue-500 px-3 py-1 rounded font-bold w-14 text-center">
+                        Play
+                    </button>
+                    <button onclick="stepVideo(-1)" class="bg-gray-700 hover:bg-gray-600 px-2 py-1 rounded" title="Mundur 1 detik">-1s</button>
+                    <button onclick="stepVideo(1)" class="bg-gray-700 hover:bg-gray-600 px-2 py-1 rounded" title="Maju 1 detik">+1s</button>
+                    <button onclick="resetCamera360()" class="bg-gray-700 hover:bg-gray-600 px-2 py-1 rounded" title="Reset sudut pandang">Reset</button>
+                    
+                    <input type="range" id="seek-bar" value="0" min="0" max="100" step="0.1" class="flex-grow cursor-pointer accent-blue-500">
+                    <span id="video-duration" class="font-mono text-gray-300">00:00:00</span>
+                </div>
+                
+                <div class="bg-blue-50 p-2.5 rounded mb-3 text-sm border border-blue-200">
+                    <div class="grid grid-cols-2 gap-2 text-xs">
+                        <div><strong>Waktu Video:</strong> <span id="current-time" class="font-mono font-bold text-blue-900">00:00:00</span></div>
+                        <div><strong>Status GPS:</strong> <span id="current-coord">Menunggu sinkronisasi...</span></div>
+                        <div><strong>Latitude:</strong> <span id="val-lat" class="font-mono">-</span></div>
+                        <div><strong>Longitude:</strong> <span id="val-lon" class="font-mono">-</span></div>
+                    </div>
+                </div>
+
+                <div class="space-y-2.5 bg-gray-50 p-3 rounded border">
+                    <div class="flex items-center justify-between gap-2 border-b pb-1.5">
+                        <h3 class="font-bold text-xs text-gray-700">Form Pencatatan Titik Aset</h3>
+                        <div class="flex items-center gap-2">
+                            <label class="flex items-center gap-1 text-[11px] font-semibold text-gray-700 cursor-pointer bg-white border rounded px-2 py-1" title="Simpan tampilan layar pemutar video (sudut pandang & zoom saat ini) sebagai gambar titik">
+                                <input type="checkbox" id="chk-simpan-foto" class="rounded" checked>Simpan gambar layar
+                            </label>
+                            <button id="btn-save" onclick="saveAssetPoint()">Catat Tiang</button>
+                        </div>
+                    </div>
+
+                    <!-- TAB JENIS JARINGAN -->
+                    <div class="grid grid-cols-2 gap-1 bg-gray-200 p-1 rounded" role="tablist">
+                        <button type="button" id="tab-jtm" role="tab" onclick="switchJaringan('JTM')">
+                             Tiang JTM <span class="font-normal opacity-80">(Tegangan Menengah)</span>
+                        </button>
+                        <button type="button" id="tab-jtr" role="tab" onclick="switchJaringan('JTR')">
+                             Tiang JTR <span class="font-normal opacity-80">(Tegangan Rendah)</span>
+                        </button>
+                    </div>
+
+                    <!-- FORM KHUSUS JTM -->
+                    <div id="form-jtm" class="space-y-2.5 border-l-4 border-red-500 pl-2.5">
+                        <!-- Sirkit penyulang utama (isi dibuat oleh JS: renderJtmCircuit) -->
+                        <div id="circuit-jtm1"></div>
+
+                        <label class="flex items-center gap-1.5 text-xs font-semibold text-gray-700 cursor-pointer bg-white border rounded p-2">
+                            <input type="checkbox" id="chk-underbuilt" class="rounded" onchange="updateUnderbuiltUI()">
+                            <span> Tiang Underbuilt <span class="font-normal text-gray-500">(1 tiang dipakai 2–3 penyulang dan/atau JTR)</span></span>
+                        </label>
+
+                        <div id="underbuilt-panel" class="hidden space-y-2 border border-dashed border-gray-400 rounded p-2 bg-gray-100">
+                            <label class="flex items-center gap-1.5 text-[11px] font-semibold text-gray-700 cursor-pointer">
+                                <input type="checkbox" id="chk-circ-jtm2" class="rounded" onchange="updateUnderbuiltUI()"> Penyulang ke-2
+                            </label>
+                            <div id="circuit-jtm2" class="hidden"></div>
+
+                            <label class="flex items-center gap-1.5 text-[11px] font-semibold text-gray-700 cursor-pointer">
+                                <input type="checkbox" id="chk-circ-jtm3" class="rounded" onchange="updateUnderbuiltUI()"> Penyulang ke-3
+                            </label>
+                            <div id="circuit-jtm3" class="hidden"></div>
+
+                            <label class="flex items-center gap-1.5 text-[11px] font-semibold text-gray-700 cursor-pointer">
+                                <input type="checkbox" id="chk-circ-jtr" class="rounded" onchange="updateUnderbuiltUI()"> Ada JTR di tiang ini
+                            </label>
+                            <!-- Blok sirkit JTR dipindahkan ke sini saat tiang underbuilt punya JTR -->
+                            <div id="slot-jtr-underbuilt" class="hidden"></div>
+                        </div>
+
+                        <div class="grid grid-cols-2 gap-2">
+                            <div>
+                                <label class="block text-[11px] font-semibold text-gray-600">Kategori Konstruksi JTM</label>
+                                <select id="jtm-konstruksi" class="w-full text-xs border rounded p-1.5 bg-white">
+                                    <option value="">-- Pilih Konstruksi JTM --</option>
+                                </select>
+                            </div>
+                            <div>
+                                <label class="block text-[11px] font-semibold text-gray-600">Perlengkapan di Tiang Ini</label>
+                                <div class="flex gap-3 bg-white p-1.5 rounded border text-xs">
+                                    <label class="flex items-center gap-1 cursor-pointer"><input type="checkbox" id="jtm-chk-lbs" class="rounded"> LBS</label>
+                                    <label class="flex items-center gap-1 cursor-pointer"><input type="checkbox" id="jtm-chk-gardu" class="rounded"> Gardu Distribusi</label>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- FORM KHUSUS JTR -->
+                    <div id="form-jtr" class="space-y-2.5 border-l-4 border-orange-500 pl-2.5 hidden">
+                        <div id="slot-jtr-main">
+                            <!-- Blok sirkit JTR: dipakai di tab JTR dan di panel underbuilt tab JTM -->
+                            <div id="circuit-jtr" class="bg-white border border-orange-200 rounded p-2 space-y-2">
+                                <div class="grid grid-cols-2 gap-2">
+                                    <div>
+                                        <label class="block text-[11px] font-semibold text-gray-600">Gardu Sumber</label>
+                                        <div class="flex gap-1">
+                                            <input type="text" id="jtr-gardu" value="GD-001" class="flex-grow min-w-0 text-xs border rounded p-1.5">
+                                            <button type="button" onclick="saveGarduPoint()" class="bg-violet-600 hover:bg-violet-700 text-white text-[11px] font-bold px-2 rounded whitespace-nowrap" title="Catat posisi gardu pada detik video ini">📍 Catat Gardu</button>
+                                        </div>
+                                        <p id="jtr-gardu-status" class="text-[10px] mt-0.5 text-gray-400">Posisi gardu belum dicatat</p>
+                                    </div>
+                                    <div>
+                                        <label class="block text-[11px] font-semibold text-gray-600">Jurusan</label>
+                                        <select id="jtr-jurusan" class="w-full text-xs border rounded p-1.5 bg-white">
+                                            <option value="A">01</option>
+                                            <option value="B">02</option>
+                                            <option value="C">03</option>
+                                            <option value="D">04</option>
+                                        </select>
+                                    </div>
+                                </div>
+                                <div class="grid grid-cols-3 gap-2">
+                                    <div>
+                                        <label class="block text-[11px] font-semibold text-gray-600">Jalur Aktif JTR</label>
+                                        <select id="jtr-segmen" class="w-full text-xs border rounded p-1.5 bg-white"></select>
+                                    </div>
+                                    <div>
+                                        <label class="block text-[11px] font-semibold text-gray-600">ID Tiang (otomatis)</label>
+                                        <input type="text" id="jtr-nama" readonly class="w-full text-xs border rounded p-1.5 bg-gray-100 font-mono font-bold text-orange-700">
+                                    </div>
+                                    <div>
+                                        <label class="block text-[11px] font-semibold text-gray-600">Jumlah SR</label>
+                                        <input type="number" id="jtr-jumlah-sr" value="0" min="0" step="1" class="w-full text-xs border rounded p-1.5">
+                                    </div>
+                                </div>
+                                <div class="flex items-end gap-1 pt-2 border-t border-dashed">
+                                    <div class="flex-grow min-w-0">
+                                        <label class="block text-[11px] font-semibold text-gray-600">Buat cabang JTR baru dari tiang:</label>
+                                        <select id="jtr-cabang-dari" class="w-full text-xs border rounded p-1.5 bg-white"></select>
+                                    </div>
+                                    <button type="button" onclick="createBranch('jtr')" class="bg-orange-100 hover:bg-orange-200 text-orange-800 border border-orange-300 text-[11px] font-bold px-2 py-1.5 rounded whitespace-nowrap">➕ Buat Cabang</button>
+                                </div>
+                            </div>
+                        </div>
+
+                        <div>
+                            <label class="block text-[11px] font-semibold text-gray-600">Kategori Konstruksi JTR</label>
+                            <select id="jtr-konstruksi" class="w-full text-xs border rounded p-1.5 bg-white">
+                                <option value="">-- Pilih Konstruksi JTR --</option>
+                            </select>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- SISI KANAN: PANEL MAP INTERAKTIF + TABEL HASIL -->
+            <div class="lg:col-span-6 flex flex-col gap-4">
+                
+                <div class="bg-white p-3 rounded-lg shadow">
+                    <div class="flex flex-wrap justify-between items-center mb-2 gap-2">
+                        <div>
+                            <h3 class="font-bold text-xs text-gray-800">Peta Koreksi Koordinat (Geser Pin)</h3>
+                            <p class="text-[10px] text-gray-500">Klik & geser pin tiang untuk memperbaiki akurasi posisi pada peta satelit.</p>
+                        </div>
+                        <div class="flex flex-wrap items-center gap-2 text-xs">
+                            <span class="inline-flex items-center"><span class="w-2 h-2 rounded-full bg-blue-500 mr-1"></span>Kamera</span>
+                            <span class="inline-flex items-center"><span class="w-2 h-2 rounded-full bg-red-600 mr-1"></span>Tiang JTM</span>
+                            <span class="inline-flex items-center"><span class="w-2 h-2 rounded-full bg-orange-500 mr-1"></span>Tiang JTR</span>
+                            <span class="inline-flex items-center"><span class="w-2 h-2 rounded-full bg-gray-900 mr-1"></span>Underbuilt</span>
+                            <span class="inline-flex items-center"><span class="w-2 h-2 rounded-full bg-violet-600 mr-1"></span>Gardu</span>
+                        </div>
+                    </div>
+
+                    <!-- Tampilkan nama aset sebagai label permanen di peta -->
+                    <div class="flex flex-wrap items-center gap-x-3 gap-y-1 mb-2 text-[11px] bg-gray-50 border rounded px-2 py-1">
+                        <span class="font-semibold text-gray-600">Tampilkan nama:</span>
+                        <label class="flex items-center gap-1 cursor-pointer"><input type="checkbox" id="lbl-tiang-jtm" class="rounded" onchange="renderAssetMarkers()"> Tiang JTM</label>
+                        <label class="flex items-center gap-1 cursor-pointer"><input type="checkbox" id="lbl-tiang-jtr" class="rounded" onchange="renderAssetMarkers()"> Tiang JTR</label>
+                        <label class="flex items-center gap-1 cursor-pointer"><input type="checkbox" id="lbl-gardu" class="rounded" onchange="renderAssetMarkers()"> Gardu</label>
+                        <label class="flex items-center gap-1 cursor-pointer"><input type="checkbox" id="lbl-garis-jtm" class="rounded" onchange="updatePolyline()"> Garis Penyulang (segmen JTM)</label>
+                        <label class="flex items-center gap-1 cursor-pointer"><input type="checkbox" id="lbl-gawang-jtr" class="rounded" onchange="updatePolyline()"> Segmen JTR (gawang)</label>
+                        <label class="flex items-center gap-1 cursor-pointer"><input type="checkbox" id="lbl-jarak" class="rounded" onchange="updatePolyline()">  Jarak antar tiang</label>
+                    </div>
+                    
+                    <div id="map-editor" class="border border-gray-300"></div>
+                    
+                    <div id="map-edit-status" class="mt-2 text-xs bg-gray-50 border border-gray-200 p-2 rounded text-gray-600 flex justify-between items-center">
+                        <span>Geser pin pada peta untuk menyesuaikan posisi tiang.</span>
+                        <button onclick="fitMapToAssets()" class="text-blue-600 hover:underline font-semibold ml-2 whitespace-nowrap">Zoom Semua</button>
+                    </div>
+                </div>
+
+                <div class="bg-white p-3 rounded-lg shadow flex-grow flex flex-col">
+                    <div class="flex justify-between items-center mb-2">
+                        <h3 class="font-bold text-xs text-gray-700">Daftar Titik Survei Tercatat (<span id="count-data">0</span>)</h3>
+                        <div class="space-x-2">
+                            <button onclick="exportToExcel().catch(e => alert('Gagal membuat file Excel: ' + e.message))" class="bg-green-600 hover:bg-green-700 text-white text-[11px] font-bold py-1 px-2.5 rounded shadow">
+                                📊 Export Excel (.xlsx)
+                            </button>
+                            <button onclick="clearData()" class="bg-red-100 hover:bg-red-200 text-red-700 text-[11px] font-bold py-1 px-2 rounded">
+                                Reset
+                            </button>
+                        </div>
+                    </div>
+
+                    <div class="overflow-x-auto border rounded">
+                        <table class="w-full text-left border-collapse text-xs">
+                            <thead>
+                                <tr class="bg-gray-200 sticky top-0 z-10">
+                                    <th class="p-1.5 border">Seq</th>
+                                    <th class="p-1.5 border">Nama</th>
+                                    <th class="p-1.5 border text-center">Gambar</th>
+                                    <th class="p-1.5 border">Koordinat (Lat, Lon)</th>
+                                    <th class="p-1.5 border">Status Posisi</th>
+                                    <th class="p-1.5 border text-center">Aksi</th>
+                                </tr>
+                            </thead>
+                            <tbody id="table-body">
+                                <tr>
+                                   <td colspan="6" class="p-3 text-center text-gray-400">Belum ada data dicatat. Putar video dan klik catat.</td>
+                                </tr>
+                            </tbody>
+                        </table>
+                    </div>
+                </div>
+
+            </div>
+        </div>
+    </div>
+
+    <!-- MODAL EDIT DATA TERCATAT -->
+    <div id="edit-modal" class="hidden fixed inset-0 bg-black/50 z-[2000] flex items-center justify-center p-4" onclick="if (event.target === this) closeEdit()">
+        <div class="bg-white rounded-lg shadow-xl w-full max-w-xl max-h-[90vh] flex flex-col">
+            <div class="flex justify-between items-center px-4 py-2 border-b">
+                <h3 id="edit-title" class="font-bold text-sm text-gray-800">Edit Data</h3>
+                <button type="button" onclick="closeEdit()" class="text-gray-500 hover:text-gray-800 text-lg leading-none" title="Tutup">Close</button>
+            </div>
+            <div id="edit-body" class="p-4 space-y-3 text-xs overflow-auto"></div>
+            <div class="flex justify-end gap-2 px-4 py-2 border-t bg-gray-50 rounded-b-lg">
+                <button type="button" onclick="closeEdit()" class="bg-gray-200 hover:bg-gray-300 text-gray-800 text-xs font-bold py-1.5 px-3 rounded">Batal</button>
+                <button type="button" onclick="applyEdit()" class="bg-blue-600 hover:bg-blue-700 text-white text-xs font-bold py-1.5 px-3 rounded shadow">Simpan Perubahan</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- MODAL PRATINJAU GAMBAR TITIK -->
+    <div id="foto-modal" class="hidden fixed inset-0 bg-black/80 z-[2100] flex items-center justify-center p-4 cursor-pointer" onclick="closeFoto()">
+        <div class="max-w-5xl w-full flex flex-col items-center gap-2">
+            <img id="foto-modal-img" alt="Gambar titik" class="max-h-[85vh] max-w-full rounded shadow-lg bg-black">
+            <p id="foto-modal-caption" class="text-white text-xs font-semibold text-center"></p>
+            <p class="text-gray-300 text-[10px]">Klik di mana saja atau tekan Esc untuk menutup</p>
+        </div>
+    </div>
+
+    <script>
+        let gpsDataPoints = [];
+        let recordedAssets = [];
+        let seqCounter = 1;
+
+        const videoElement = document.getElementById('video-element');
+        const viewerContainer = document.getElementById('viewer-360');
+        const seekBar = document.getElementById('seek-bar');
+        const btnPlayPause = document.getElementById('btn-play-pause');
+
+        let map, currentPosMarker, assetMarkersLayer, lineLayer;
+        let assetMarkerObjects = {};
+
+        // ===== KONFIGURASI JENIS JARINGAN (JTM / JTR) =====
+        let activeJaringan = 'JTM';
+
+        const JARINGAN_STYLE = {
+            JTM: { label: 'Tiang JTM', tabActive: 'bg-red-600 text-white shadow',    btn: 'bg-red-600 hover:bg-red-700',       badge: 'bg-red-100 text-red-700 border-red-300' },
+            JTR: { label: 'Tiang JTR', tabActive: 'bg-orange-500 text-white shadow', btn: 'bg-orange-500 hover:bg-orange-600', badge: 'bg-orange-100 text-orange-700 border-orange-300' }
+        };
+
+        // Gaya per jenis titik fisik (badge tabel + warna pin peta)
+        const TIANG_STYLE = {
+            'TM':            { badge: 'bg-red-100 text-red-700 border-red-300',          pin: 'red' },
+            'TR':            { badge: 'bg-orange-100 text-orange-700 border-orange-300', pin: 'orange' },
+            'TM Underbuilt': { badge: 'bg-gray-800 text-white border-gray-900',          pin: 'black' },
+            'Gardu':         { badge: 'bg-violet-100 text-violet-700 border-violet-300', pin: 'violet' }
+        };
+
+        // Garis jalur di peta: JTM dan JTR tidak pernah disambung satu sama lain
+        const LINE_STYLE = {
+            JTM: { color: '#dc2626', weight: 3 },
+            JTR: { color: '#f97316', weight: 2, dashArray: '6, 4' }
+        };
+
+        const DEFAULT_CATEGORIES = {
+            JTM: ['TM-1', 'TM-2', 'TM-4', 'TM-5', 'Gardu Portal', 'Gardu Cantol', 'Gardu Beton'],
+            JTR: ['TR-1', 'TR-2']
+        };
+
+        // ===== MODEL DATA =====
+        // recordedAssets berisi TITIK FISIK:
+        //   - Tipe 'GARDU' : titik gardu sumber JTR
+        //   - Tipe 'TIANG' : satu tiang fisik + daftar Sirkit yang melewatinya
+        //     (tiang biasa 1 sirkit; tiang underbuilt 2-3 sirkit JTM dan/atau 1 sirkit JTR).
+        //     Sirkit: { Jenis, Group, Segmen, No_Urut, ID_Tiang, Penyulang | Gardu_Sumber+Jurusan }
+        //
+        // ===== SEGMEN / JALUR (format ID sama untuk JTM dan JTR) =====
+        //   Grup = penyulang (JTM) atau gardu+jurusan (JTR).
+        //   - Segmen utama               : JTM T1, T2 ... ; JTR A1, A2 ... (garis JTR berawal dari gardu)
+        //   - Cabang ke-1 dari tiang A4  : A4.1, A4.2 ...
+        //   - Cabang ke-2 dari tiang A4  : A4/2.1, A4/2.2 ...
+        //   - Cabang dari cabang         : A4.2.1 ...
+        //   JTM: segmen tambahan bernama bebas (diisi pengguna); ID tiangnya tetap memakai format di atas.
+        //   JTR: ID tiang = huruf jurusan + nomor berjalan per jurusan (A1, A2, ... tetap lanjut di cabang,
+        //        mis. cabang dari A4 setelah A5 -> A6, A7). Jurusan lain mulai dari 1 lagi (B1, B2 ...).
+        //        Kode cabang (A4, A4/2 ...) dan No_Urut tetap dipakai untuk urutan & identitas garis.
+        //   JTR: 1 segmen = 1 gawang (antara 2 tiang), dinamai "Tiang1 - Tiang2", mis. "A4 - A6".
+        const MAIN_SEG = 'MAIN';
+        const JTM_MAIN_PREFIX = 'T';
+        let segments = [];      // { jenis, group, segId, parent, index, name, idPrefix }
+        let mainSegNames = {};  // nama segmen utama JTM per penyulang (default "Utama")
+        let segCounter = 0;
+
+        // Slot sirkit di form. jtm1 = penyulang utama; jtm2/jtm3/jtr dipakai saat underbuilt.
+        const CIRCUITS = {
+            jtm1: { jenis: 'JTM', title: 'Penyulang',      defaultName: 'Penyulang-01' },
+            jtm2: { jenis: 'JTM', title: 'Penyulang ke-2', defaultName: 'Penyulang-02' },
+            jtm3: { jenis: 'JTM', title: 'Penyulang ke-3', defaultName: 'Penyulang-03' },
+            jtr:  { jenis: 'JTR' }
+        };
+
+        const el = id => document.getElementById(id);
+        const esc = s => String(s == null ? '' : s).replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+
+        function renderJtmCircuit(key) {
+            const c = CIRCUITS[key];
+            const LBL = 'block text-[11px] font-semibold text-gray-600';
+            el(`circuit-${key}`).innerHTML = `
+                <div class="bg-white border border-red-200 rounded p-2 space-y-2">
+                    <div class="grid grid-cols-3 gap-2">
+                        <div>
+                            <label class="${LBL}">${c.title}</label>
+                            <input type="text" id="${key}-group" value="${c.defaultName}" class="w-full text-xs border rounded p-1.5">
+                        </div>
+                        <div>
+                            <label class="${LBL}">Segmen Aktif</label>
+                            <div class="flex gap-1">
+                                <select id="${key}-segmen" class="flex-grow min-w-0 text-xs border rounded p-1.5 bg-white"></select>
+                                <button type="button" onclick="renameSegment('${key}')" class="border rounded px-1.5 bg-white hover:bg-gray-100 text-xs" title="Ganti nama segmen aktif">✏️</button>
+                            </div>
+                        </div>
+                        <div>
+                            <label class="${LBL}">ID Tiang (otomatis)</label>
+                            <input type="text" id="${key}-nama" readonly class="w-full text-xs border rounded p-1.5 bg-gray-100 font-mono font-bold text-red-700">
+                        </div>
+                    </div>
+                    <div class="grid grid-cols-[1fr_1fr_auto] gap-1 items-end pt-2 border-t border-dashed">
+                        <div>
+                            <label class="${LBL}">Nama segmen baru</label>
+                            <input type="text" id="${key}-seg-nama" placeholder="mis. Segmen Kampung Baru" class="w-full text-xs border rounded p-1.5">
+                        </div>
+                        <div>
+                            <label class="${LBL}">Berawal dari tiang</label>
+                            <select id="${key}-cabang-dari" class="w-full text-xs border rounded p-1.5 bg-white"></select>
+                        </div>
+                        <button type="button" onclick="createBranch('${key}')" class="bg-red-50 hover:bg-red-100 text-red-800 border border-red-300 text-[11px] font-bold px-2 py-1.5 rounded whitespace-nowrap">➕ Tambah Segmen</button>
+                    </div>
+                </div>`;
+        }
+
+        // Konteks sirkit: jaringan apa dan grup apa (penyulang / gardu+jurusan)
+        function getCircuitContext(key) {
+            if (CIRCUITS[key].jenis === 'JTM') {
+                const penyulang = el(`${key}-group`).value.trim();
+                return { key, jenis: 'JTM', penyulang, group: penyulang, valid: !!penyulang };
+            }
+            const gardu = el('jtr-gardu').value.trim();
+            const jurusan = el('jtr-jurusan').value;
+            return { key, jenis: 'JTR', gardu, jurusan, group: `${gardu}|${jurusan}`, valid: !!gardu };
+        }
+
+        const groupGardu = group => group.slice(0, group.lastIndexOf('|'));
+        const groupJurusan = group => group.slice(group.lastIndexOf('|') + 1);
+
+        function segmentsOf(jenis, group) {
+            return segments.filter(s => s.jenis === jenis && s.group === group);
+        }
+
+        function getSeg(jenis, group, segId) {
+            return segments.find(s => s.jenis === jenis && s.group === group && s.segId === segId);
+        }
+
+        // Kode cabang: "A4" (cabang ke-1 dari A4), "A4/2" (cabang ke-2 dari A4)
+        function branchCode(s) {
+            return s.parent + (s.index > 1 ? `/${s.index}` : '');
+        }
+
+        // Awalan ID tiang: "T"/"A" (utama), "A4." / "A4/2." (cabang), "NamaSegmen-" (segmen JTM terpisah)
+        function idPrefix(jenis, group, segId) {
+            if (jenis === 'JTR') return groupJurusan(group);   // JTR: nomor berjalan per jurusan
+            if (segId === MAIN_SEG) return JTM_MAIN_PREFIX;
+            const s = getSeg(jenis, group, segId);
+            if (!s) return '?';
+            return s.parent ? branchCode(s) + '.' : s.idPrefix;
+        }
+
+        function segName(jenis, group, segId) {
+            if (segId === MAIN_SEG) return jenis === 'JTM' ? (mainSegNames[group] || 'Utama') : 'Utama';
+            const s = getSeg(jenis, group, segId);
+            if (!s) return segId;
+            return jenis === 'JTM' ? s.name : `Cabang ${branchCode(s)}`;
+        }
+
+        // Info turunan sebuah sirkit; dihitung ulang agar selalu ikut perubahan nama segmen / ID tiang
+        function segmentInfo(m) {
+            const s = m.Segmen === MAIN_SEG ? null : getSeg(m.Jenis, m.Group, m.Segmen);
+            const name = segName(m.Jenis, m.Group, m.Segmen);
+            return {
+                Nama_Segmen: name,
+                Berawal_Dari: s ? (s.parent || '') : (m.Jenis === 'JTR' ? m.Gardu_Sumber : ''),
+                // ID unik per garis (mis. untuk ArcGIS: Points To Line)
+                Line_ID: m.Jenis === 'JTM'
+                    ? `${m.Penyulang}/${name}`
+                    : `${m.Gardu_Sumber}/${m.Jurusan}/${s ? branchCode(s) : m.Jurusan}`
+            };
+        }
+
+        function segmentOptionLabel(jenis, group, segId) {
+            const p = idPrefix(jenis, group, segId);
+            const contoh = `${p}1, ${p}2 …`;
+            if (jenis === 'JTM') {
+                const s = getSeg(jenis, group, segId);
+                const asal = s ? (s.parent ? ` — dari ${s.parent}` : ' — terpisah') : '';
+                return `${segName(jenis, group, segId)} (${contoh})${asal}`;
+            }
+            if (segId === MAIN_SEG) return `Jalur Utama dari ${groupGardu(group) || 'gardu'}`;
+            const s = getSeg(jenis, group, segId);
+            return `Cabang${s.index > 1 ? ` ke-${s.index}` : ''} dari ${s.parent} (kode ${branchCode(s)})`;
+        }
+
+        // Semua sirkit (beserta tiang fisiknya) untuk satu jaringan + grup, urut sesuai pencatatan
+        function membersOf(jenis, group) {
+            const out = [];
+            recordedAssets.forEach(pole => (pole.Sirkit || []).forEach(m => {
+                if (m.Jenis === jenis && m.Group === group) out.push({ pole, m });
+            }));
+            return out;
+        }
+
+        function nextNumber(jenis, group, segId, exclude) {
+            return membersOf(jenis, group)
+                .filter(x => x.m.Segmen === segId && x.m !== exclude)
+                .reduce((max, x) => Math.max(max, x.m.No_Urut), 0) + 1;
+        }
+
+        function idExists(jenis, group, id, exclude) {
+            return membersOf(jenis, group).some(x => x.m !== exclude && x.m.ID_Tiang === id);
+        }
+
+        // ID tiang berikutnya.
+        //   JTM: awalan segmen + No_Urut segmen (T1, T2 ... / A4.1 ...)
+        //   JTR: huruf jurusan + nomor berjalan per jurusan, lanjut walau pindah cabang (A1 ... A5, A6 ...)
+        function nextTiangId(jenis, group, segId) {
+            const p = idPrefix(jenis, group, segId);
+            let no;
+            if (jenis === 'JTR') {
+                no = membersOf(jenis, group).reduce((max, x) => {
+                    const id = x.m.ID_Tiang;
+                    const rest = id.startsWith(p) ? id.slice(p.length) : '';
+                    return /^\d+$/.test(rest) ? Math.max(max, parseInt(rest, 10)) : max;
+                }, 0) + 1;
+            } else {
+                no = nextNumber(jenis, group, segId);
+            }
+            while (idExists(jenis, group, p + no)) no++;   // hindari bentrok dengan ID yang diedit manual
+            return p + no;
+        }
+
+        function findGardu(name) {
+            return recordedAssets.find(p => p.Tipe === 'GARDU' && p.Nama_Titik === name);
+        }
+
+        // Titik awal garis sebuah segmen:
+        //   utama JTR -> titik gardu; utama JTM / segmen terpisah -> tidak ada;
+        //   cabang -> tiang percabangan pada grup yang sama
+        function findSegmentStart(m) {
+            if (m.Segmen === MAIN_SEG) {
+                const gardu = m.Jenis === 'JTR' ? findGardu(m.Gardu_Sumber) : null;
+                return gardu ? { pole: gardu, id: gardu.Nama_Titik } : null;
+            }
+            const s = getSeg(m.Jenis, m.Group, m.Segmen);
+            if (!s || !s.parent) return null;
+            const hit = membersOf(m.Jenis, m.Group).find(x => x.m.ID_Tiang === s.parent);
+            return hit ? { pole: hit.pole, id: hit.m.ID_Tiang } : null;
+        }
+
+        // selectSegId : segmen yang ingin dipilih (mis. segmen yang baru dibuat)
+        // selectParent: tiang yang ingin dipilih di "Berawal dari" (mis. tiang yang baru dicatat)
+        function refreshCircuit(key, selectSegId, selectParent) {
+            const ctx = getCircuitContext(key);
+
+            // 1. Daftar segmen / jalur
+            const segSelect = el(`${key}-segmen`);
+            const prevSeg = selectSegId || segSelect.value;
+            const segIds = [MAIN_SEG, ...segmentsOf(ctx.jenis, ctx.group).map(s => s.segId)];
+            segSelect.innerHTML = '';
+            segIds.forEach(id => {
+                const opt = document.createElement('option');
+                opt.value = id;
+                opt.textContent = segmentOptionLabel(ctx.jenis, ctx.group, id);
+                segSelect.appendChild(opt);
+            });
+            segSelect.value = segIds.includes(prevSeg) ? prevSeg : MAIN_SEG;
+
+            // 2. ID tiang berikutnya pada segmen aktif
+            const segId = segSelect.value;
+            el(`${key}-nama`).value = nextTiangId(ctx.jenis, ctx.group, segId);
+
+            // 3. Pilihan tiang awal segmen/cabang (default: tiang terakhir yang dicatat pada grup ini)
+            const ids = membersOf(ctx.jenis, ctx.group).map(x => x.m.ID_Tiang);
+            const branchSelect = el(`${key}-cabang-dari`);
+            const prevParent = selectParent != null ? selectParent : branchSelect.value;
+            branchSelect.innerHTML = '';
+            const addOpt = (value, text) => {
+                const opt = document.createElement('option');
+                opt.value = value;
+                opt.textContent = text;
+                branchSelect.appendChild(opt);
+            };
+            if (!ids.length && ctx.jenis === 'JTR') addOpt('', '-- Belum ada tiang JTR --');
+            ids.forEach(id => addOpt(id, id));
+            if (ctx.jenis === 'JTM') addOpt('', '— Tidak tersambung (segmen terpisah) —');
+            const values = ctx.jenis === 'JTM' ? [...ids, ''] : ids;
+            branchSelect.value = values.includes(prevParent) && (prevParent !== '' || !selectParent)
+                ? prevParent
+                : (ids.length ? ids[ids.length - 1] : '');
+
+            // 4. Status titik gardu (khusus JTR)
+            if (ctx.jenis === 'JTR') {
+                const status = el('jtr-gardu-status');
+                if (!ctx.gardu) {
+                    status.textContent = 'Isi nama gardu sumber';
+                    status.className = 'text-[10px] mt-0.5 text-red-600';
+                } else if (findGardu(ctx.gardu)) {
+                    status.textContent = `✅ Posisi ${ctx.gardu} sudah dicatat`;
+                    status.className = 'text-[10px] mt-0.5 text-green-600';
+                } else {
+                    status.textContent = `⚠️ Posisi ${ctx.gardu} belum dicatat`;
+                    status.className = 'text-[10px] mt-0.5 text-amber-600';
+                }
+            }
+        }
+
+        function refreshAllCircuits(selectParents = {}) {
+            Object.keys(CIRCUITS).forEach(key => refreshCircuit(key, null, selectParents[key]));
+        }
+
+        function segNameTaken(jenis, group, name, exceptSegId) {
+            const n = name.toLowerCase();
+            return [MAIN_SEG, ...segmentsOf(jenis, group).map(s => s.segId)]
+                .some(id => id !== exceptSegId && segName(jenis, group, id).toLowerCase() === n);
+        }
+
+        // JTM: tambah segmen (nama bebas, boleh tersambung ke tiang atau terpisah)
+        // JTR: buat cabang dari tiang (A4.1 ... / A4/2.1 ...)
+        function createBranch(key) {
+            const ctx = getCircuitContext(key);
+            if (!ctx.valid) {
+                alert(ctx.jenis === 'JTM' ? "Nama penyulang belum diisi!" : "Nama Gardu Sumber belum diisi!");
+                return;
+            }
+            const parent = el(`${key}-cabang-dari`).value;
+            const seg = { jenis: ctx.jenis, group: ctx.group, segId: '', parent, index: 0, name: '', idPrefix: '' };
+
+            if (ctx.jenis === 'JTM') {
+                seg.name = el(`${key}-seg-nama`).value.trim();
+                if (!parent && !seg.name) {
+                    alert("Isi nama segmen baru, atau pilih tiang awal segmen.");
+                    el(`${key}-seg-nama`).focus();
+                    return;
+                }
+            } else if (!parent) {
+                alert("Catat minimal 1 tiang JTR dulu sebelum membuat cabang.");
+                return;
+            }
+
+            if (parent) seg.index = segmentsOf(ctx.jenis, ctx.group).filter(s => s.parent === parent).length + 1;
+            if (ctx.jenis === 'JTM') {
+                if (!seg.name) seg.name = `Cabang ${branchCode(seg)}`;
+                if (segNameTaken(ctx.jenis, ctx.group, seg.name)) {
+                    alert(`Nama segmen "${seg.name}" sudah dipakai pada ${ctx.penyulang}.`);
+                    return;
+                }
+                if (!parent) seg.idPrefix = seg.name.replace(/\s+/g, '') + '-';
+                el(`${key}-seg-nama`).value = '';
+            }
+
+            seg.segId = `S${++segCounter}`;
+            segments.push(seg);
+            refreshAllCircuits();          // slot lain bisa memakai grup yang sama
+            refreshCircuit(key, seg.segId);
+        }
+
+        function renameSegment(key) {
+            const ctx = getCircuitContext(key);
+            if (!ctx.valid) return;
+            const segId = el(`${key}-segmen`).value;
+            const old = segName(ctx.jenis, ctx.group, segId);
+            const input = prompt(`Nama baru untuk segmen "${old}" (${ctx.penyulang}):`, old);
+            if (input === null) return;
+            const name = input.trim();
+            if (!name || name === old) return;
+            if (segNameTaken(ctx.jenis, ctx.group, name, segId)) {
+                alert(`Nama segmen "${name}" sudah dipakai pada ${ctx.penyulang}.`);
+                return;
+            }
+            if (segId === MAIN_SEG) mainSegNames[ctx.group] = name;
+            else getSeg(ctx.jenis, ctx.group, segId).name = name;
+            refreshAllCircuits();
+            updateTable();
+            renderAssetMarkers();
+        }
+
+        // Sirkit yang ikut dicatat saat tombol simpan ditekan
+        function getActiveCircuitKeys() {
+            if (activeJaringan === 'JTR') return ['jtr'];
+            const keys = ['jtm1'];
+            if (el('chk-underbuilt').checked) {
+                if (el('chk-circ-jtm2').checked) keys.push('jtm2');
+                if (el('chk-circ-jtm3').checked) keys.push('jtm3');
+                if (el('chk-circ-jtr').checked) keys.push('jtr');
+            }
+            return keys;
+        }
+
+        // Blok sirkit JTR hanya satu; dipindah ke tab JTR atau ke panel underbuilt tab JTM
+        function placeJtrBlock() {
+            const target = el(activeJaringan === 'JTR' ? 'slot-jtr-main' : 'slot-jtr-underbuilt');
+            const block = el('circuit-jtr');
+            if (block.parentElement !== target) target.appendChild(block);
+        }
+
+        function updateUnderbuiltUI() {
+            const isUnderbuilt = el('chk-underbuilt').checked;
+            el('underbuilt-panel').classList.toggle('hidden', !isUnderbuilt);
+            el('circuit-jtm2').classList.toggle('hidden', !el('chk-circ-jtm2').checked);
+            el('circuit-jtm3').classList.toggle('hidden', !el('chk-circ-jtm3').checked);
+            el('slot-jtr-underbuilt').classList.toggle('hidden', !el('chk-circ-jtr').checked);
+            placeJtrBlock();
+            updateSaveButton();
+        }
+
+        function updateSaveButton() {
+            const btn = el('btn-save');
+            btn.className = `${JARINGAN_STYLE[activeJaringan].btn} text-white font-bold py-1.5 px-3 rounded text-xs shadow transition text-right`;
+            let label = JARINGAN_STYLE[activeJaringan].label;
+            const keys = getActiveCircuitKeys();
+            if (activeJaringan === 'JTM' && keys.length > 1) {
+                const nPenyulang = keys.filter(k => CIRCUITS[k].jenis === 'JTM').length;
+                label = `Tiang TM Underbuilt (${nPenyulang} penyulang${keys.includes('jtr') ? ' + JTR' : ''})`;
+            }
+            btn.innerText = `💾 Catat ${label}`;
+            btn.title = 'Catat tiang pada posisi GPS detik video saat ini';
+        }
+
+        function switchJaringan(jenis) {
+            activeJaringan = jenis;
+            ['JTM', 'JTR'].forEach(j => {
+                const key = j.toLowerCase();
+                const isActive = j === jenis;
+                const tab = el('tab-' + key);
+                tab.className = `py-1.5 px-2 rounded text-xs font-bold transition ${isActive ? JARINGAN_STYLE[j].tabActive : 'text-gray-600 hover:bg-white'}`;
+                tab.setAttribute('aria-selected', isActive);
+                el('form-' + key).classList.toggle('hidden', !isActive);
+            });
+            placeJtrBlock();
+            updateSaveButton();
+        }
+
+        // Inisialisasi form sirkit
+        ['jtm1', 'jtm2', 'jtm3'].forEach(key => {
+            renderJtmCircuit(key);
+            el(`${key}-group`).addEventListener('input', () => refreshCircuit(key));
+            el(`${key}-segmen`).addEventListener('change', () => refreshCircuit(key));
+        });
+        el('jtr-gardu').addEventListener('input', () => refreshCircuit('jtr'));
+        el('jtr-jurusan').addEventListener('change', () => refreshCircuit('jtr'));
+        el('jtr-segmen').addEventListener('change', () => refreshCircuit('jtr'));
+
+        switchJaringan('JTM');
+        refreshAllCircuits();
+
+        function initMap() {
+            map = L.map('map-editor', {
+                maxZoom: 22
+            }).setView([-2.5489, 118.0149], 5);
+
+            const satelliteLayer = L.tileLayer('https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}', {
+                maxNativeZoom: 17,
+                maxZoom: 22,
+                attribution: '© Esri Satellite'
+            });
+
+            const googleSatHybrid = L.tileLayer('https://mt1.google.com/vt/lyrs=y&x={x}&y={y}&z={z}', {
+                maxNativeZoom: 20,
+                maxZoom: 22,
+                attribution: '© Google Maps'
+            });
+
+            const osmLayer = L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+                maxNativeZoom: 19,
+                maxZoom: 22,
+                attribution: '© OpenStreetMap'
+            });
+
+            satelliteLayer.addTo(map);
+
+            const baseMaps = {
+                "Citra Satelit (Esri)": satelliteLayer,
+                "Google Satelit + Jalan": googleSatHybrid,
+                "Peta Jalan (OSM)": osmLayer
+            };
+            L.control.layers(baseMaps).addTo(map);
+
+            lineLayer = L.layerGroup().addTo(map);
+            assetMarkersLayer = L.layerGroup().addTo(map);
+
+            currentPosMarker = L.circleMarker([0, 0], {
+                radius: 7,
+                fillColor: "#3b82f6",
+                color: "#ffffff",
+                weight: 2,
+                opacity: 1,
+                fillOpacity: 0.9
+            });
+        }
+
+        initMap();
+
+        function makePinIcon(color) {
+            return L.icon({
+                iconUrl: `https://raw.githubusercontent.com/pointhi/leaflet-color-markers/master/img/marker-icon-2x-${color}.png`,
+                shadowUrl: 'https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/images/marker-shadow.png',
+                iconSize: [25, 41],
+                iconAnchor: [12, 41],
+                popupAnchor: [1, -34],
+                shadowSize: [41, 41]
+            });
+        }
+
+        const PIN_ICONS = Object.fromEntries(
+            Object.entries(TIANG_STYLE).map(([jenisTiang, style]) => [jenisTiang, makePinIcon(style.pin)])
+        );
+
+        // Label satu sirkit, mis. "T12 (Penyulang-01)" atau "A3 (GD-001/A)"
+        function sirkitLabel(m) {
+            return `${m.ID_Tiang} (${m.Jenis === 'JTM' ? m.Penyulang : `${m.Gardu_Sumber}/${m.Jurusan}`})`;
+        }
+
+        const isChecked = id => !!(el(id) && el(id).checked);
+
+        // Teks label permanen di pin, sesuai checkbox "Tampilkan nama"
+        function poleMapLabel(asset) {
+            if (asset.Tipe === 'GARDU') return isChecked('lbl-gardu') ? asset.Nama_Titik : '';
+            const sirkit = asset.Sirkit || [];
+            const nJtm = sirkit.filter(m => m.Jenis === 'JTM').length;
+            return sirkit
+                .filter(m => isChecked(m.Jenis === 'JTM' ? 'lbl-tiang-jtm' : 'lbl-tiang-jtr'))
+                .map(m => (m.Jenis === 'JTM' && nJtm > 1) ? sirkitLabel(m) : m.ID_Tiang)
+                .join(' / ');
+        }
+
+        function renderAssetMarkers() {
+            assetMarkersLayer.clearLayers();
+            assetMarkerObjects = {};
+
+            recordedAssets.forEach(asset => {
+                const pos = [asset.Latitude, asset.Longitude];
+
+                const marker = L.marker(pos, {
+                    draggable: true,
+                    icon: PIN_ICONS[asset.Jenis_Tiang] || PIN_ICONS.TM,
+                    title: `${asset.Nama_Titik} (Geser untuk edit)`
+                });
+
+                const sirkitLines = (asset.Sirkit || [])
+                    .map(m => `${m.Jenis}: ${esc(sirkitLabel(m))} · ${esc(segmentInfo(m).Nama_Segmen)}`)
+                    .join('<br>');
+                marker.bindPopup(`
+                    <div class="text-xs">
+                        <strong class="text-blue-700">${asset.Jenis_Tiang}</strong> · Seq ${asset.Seq_No}<br>
+                        ${sirkitLines || esc(asset.Nama_Titik)}<br>
+                        Konstruksi: ${esc(asset.Kat_Konstruksi) || '-'}<br>
+                        Lat: ${asset.Latitude}<br>
+                        Lon: ${asset.Longitude}<br>
+                        ${asset.Foto ? `<img src="${asset.Foto}" alt="Gambar titik" style="width:180px;margin-top:4px;border-radius:4px;cursor:pointer" title="Klik untuk memperbesar" onclick="showFoto(${asset.Seq_No})"><br>` : ''}
+                        <span class="text-gray-500 italic">Geser pin ini untuk mengoreksi lokasi</span>
+                    </div>
+                `);
+
+                const label = poleMapLabel(asset);
+                if (label) {
+                    marker.bindTooltip(esc(label), { permanent: true, direction: 'right', offset: [8, -22], className: 'map-label' });
+                }
+
+                marker.on('dragend', function(e) {
+                    const newPos = e.target.getLatLng();
+                    const updatedLat = newPos.lat;
+                    const updatedLon = newPos.lng;
+
+                    // Update koordinat baru (berlaku untuk semua sirkit di tiang ini)
+                    asset.Latitude = updatedLat;
+                    asset.Longitude = updatedLon;
+
+                    // Cek apakah posisinya berbeda dari koordinat asli GPS
+                    asset.Status_Koordinat = (updatedLat !== asset.Orig_Lat || updatedLon !== asset.Orig_Lon)
+                        ? "Telah Digeser (Manual)"
+                        : "Asli (GPS)";
+
+                    marker.setPopupContent(`
+                        <div class="text-xs">
+                            <strong class="text-green-700">${esc(asset.Nama_Titik)} (Diperbarui ✅)</strong><br>
+                            Lat: ${updatedLat}<br>
+                            Lon: ${updatedLon}
+                        </div>
+                    `).openPopup();
+
+                    document.getElementById('map-edit-status').innerHTML = `
+                        <span class="text-green-700 font-semibold">✅ Koordinat <b>${esc(asset.Nama_Titik)}</b> diperbarui ke: ${updatedLat}, ${updatedLon}</span>
+                        <button onclick="fitMapToAssets()" class="text-blue-600 hover:underline font-semibold ml-2">Zoom Semua</button>
+                    `;
+
+                    updateTable();
+                    updatePolyline();
+                });
+
+                marker.addTo(assetMarkersLayer);
+                assetMarkerObjects[asset.Seq_No] = marker;
+            });
+
+            updatePolyline();
+        }
+
+        // Jarak 2 titik (meter, rumus haversine)
+        function distanceMeters(a, b) {
+            const R = 6371000, rad = d => d * Math.PI / 180;
+            const dLat = rad(b.Latitude - a.Latitude), dLon = rad(b.Longitude - a.Longitude);
+            const h = Math.sin(dLat / 2) ** 2 + Math.cos(rad(a.Latitude)) * Math.cos(rad(b.Latitude)) * Math.sin(dLon / 2) ** 2;
+            return 2 * R * Math.asin(Math.sqrt(h));
+        }
+
+        // Garis per segmen (jaringan + grup + segmen), urut No_Urut, diawali titik awal segmen
+        // (gardu untuk jalur utama JTR, tiang percabangan untuk cabang).
+        // Dipakai untuk peta DAN sheet Excel.
+        function buildLines() {
+            const groups = {};
+            recordedAssets.forEach(pole => (pole.Sirkit || []).forEach(m => {
+                const key = `${m.Jenis}|${m.Group}|${m.Segmen}`;
+                (groups[key] = groups[key] || []).push({ pole, m });
+            }));
+            return Object.values(groups).map(list => {
+                list.sort((a, b) => a.m.No_Urut - b.m.No_Urut);
+                const first = list[0].m;
+                const vertices = list.map(x => ({ pole: x.pole, id: x.m.ID_Tiang }));
+                const start = findSegmentStart(first);
+                if (start) vertices.unshift(start);
+                let length = 0;
+                for (let i = 1; i < vertices.length; i++) length += distanceMeters(vertices[i - 1].pole, vertices[i].pole);
+                return { jenis: first.Jenis, sample: first, ...segmentInfo(first), count: list.length, length, vertices };
+            });
+        }
+
+        // Gawang = bentang antara 2 titik berurutan pada sebuah garis, dinamai "Tiang1 - Tiang2"
+        function buildSpans(jenis) {
+            return buildLines().filter(l => l.jenis === jenis).flatMap(line =>
+                line.vertices.slice(1).map((to, i) => {
+                    const from = line.vertices[i];
+                    return { line, from, to, name: `${from.id} - ${to.id}`, length: distanceMeters(from.pole, to.pole) };
+                }));
+        }
+
+        function lineTooltip(layer, text, permanent, cls) {
+            layer.bindTooltip(esc(text), permanent
+                ? { permanent: true, direction: 'center', className: `map-label ${cls}` }
+                : { sticky: true });
+        }
+
+        const fmtMeter = x => `${(Math.round(x * 10) / 10).toLocaleString('id-ID')} m`;
+        const spanLatLngs = span => [[span.from.pole.Latitude, span.from.pole.Longitude], [span.to.pole.Latitude, span.to.pole.Longitude]];
+
+        function updatePolyline() {
+            lineLayer.clearLayers();
+            const showJtm = isChecked('lbl-garis-jtm');
+            const showGawang = isChecked('lbl-gawang-jtr');
+            const showJarak = isChecked('lbl-jarak');
+
+            buildLines().forEach(line => {
+                if (line.jenis !== 'JTM' || line.vertices.length < 2) return;
+                const layer = L.polyline(line.vertices.map(v => [v.pole.Latitude, v.pole.Longitude]), LINE_STYLE.JTM);
+                lineTooltip(layer, `${line.sample.Penyulang} · ${line.Nama_Segmen} (${fmtMeter(line.length)})`, showJtm, 'map-label-jtm');
+                layer.addTo(lineLayer);
+            });
+
+            // Jarak antar tiang JTM: label di tengah tiap gawang (garis transparan pembawa label)
+            if (showJarak) {
+                buildSpans('JTM').forEach(span => {
+                    const layer = L.polyline(spanLatLngs(span), { opacity: 0, weight: 1, interactive: false });
+                    lineTooltip(layer, fmtMeter(span.length), true, 'map-label-jtm map-label-dist');
+                    layer.addTo(lineLayer);
+                });
+            }
+
+            // JTR digambar per gawang agar tiap segmen punya nama sendiri
+            buildSpans('JTR').forEach(span => {
+                const layer = L.polyline(spanLatLngs(span), LINE_STYLE.JTR);
+                const text = showGawang || !showJarak ? `${span.name} (${fmtMeter(span.length)})` : fmtMeter(span.length);
+                lineTooltip(layer, text, showGawang || showJarak, 'map-label-jtr map-label-dist');
+                layer.addTo(lineLayer);
+            });
+        }
+
+        function focusOnAsset(seqNo) {
+            const asset = recordedAssets.find(a => a.Seq_No === seqNo);
+            const marker = assetMarkerObjects[seqNo];
+            if (asset && marker) {
+                map.setView([asset.Latitude, asset.Longitude], 19);
+                marker.openPopup();
+            }
+        }
+
+        function fitMapToAssets() {
+            if (recordedAssets.length === 0) return;
+            const bounds = L.latLngBounds(recordedAssets.map(a => [a.Latitude, a.Longitude]));
+            map.fitBounds(bounds, { padding: [40, 40], maxZoom: 19 });
+        }
+
+        let camera, scene, renderer, mesh;
+        let isUserInteracting = false;
+        let onPointerDownMouseX = 0, onPointerDownMouseY = 0;
+        let lon = 0, onPointerDownLon = 0;
+        let lat = 0, onPointerDownLat = 0;
+        let fov = 75;
+
+        function initThreeJS() {
+            const width = viewerContainer.clientWidth;
+            const height = viewerContainer.clientHeight;
+
+            camera = new THREE.PerspectiveCamera(fov, width / height, 1, 1100);
+            scene = new THREE.Scene();
+
+            const geometry = new THREE.SphereGeometry(500, 60, 40);
+            geometry.scale(-1, 1, 1);
+
+            const texture = new THREE.VideoTexture(videoElement);
+            texture.minFilter = THREE.LinearFilter;
+            texture.magFilter = THREE.LinearFilter;
+            texture.format = THREE.RGBFormat;
+
+            const material = new THREE.MeshBasicMaterial({ map: texture });
+            mesh = new THREE.Mesh(geometry, material);
+            scene.add(mesh);
+
+            renderer = new THREE.WebGLRenderer({ antialias: true });
+            renderer.setPixelRatio(window.devicePixelRatio);
+            renderer.setSize(width, height);
+            
+            const oldCanvas = viewerContainer.querySelector('canvas');
+            if (oldCanvas) oldCanvas.remove();
+            
+            viewerContainer.appendChild(renderer.domElement);
+
+            viewerContainer.addEventListener('pointerdown', onPointerDown);
+            document.addEventListener('pointermove', onPointerMove);
+            document.addEventListener('pointerup', onPointerUp);
+            viewerContainer.addEventListener('wheel', onDocumentMouseWheel, { passive: false });
+            window.addEventListener('resize', onWindowResize);
+
+            animate();
+        }
+
+        function onWindowResize() {
+            if (!camera || !renderer) return;
+            camera.aspect = viewerContainer.clientWidth / viewerContainer.clientHeight;
+            camera.updateProjectionMatrix();
+            renderer.setSize(viewerContainer.clientWidth, viewerContainer.clientHeight);
+        }
+
+        function onPointerDown(event) {
+            if (event.isPrimary === false) return;
+            isUserInteracting = true;
+            onPointerDownMouseX = event.clientX;
+            onPointerDownMouseY = event.clientY;
+            onPointerDownLon = lon;
+            onPointerDownLat = lat;
+        }
+
+        function onPointerMove(event) {
+            if (event.isPrimary === false || !isUserInteracting) return;
+            lon = (onPointerDownMouseX - event.clientX) * 0.15 + onPointerDownLon;
+            lat = (event.clientY - onPointerDownMouseY) * 0.15 + onPointerDownLat;
+        }
+
+        function onPointerUp(event) {
+            if (event.isPrimary === false) return;
+            isUserInteracting = false;
+        }
+
+        function onDocumentMouseWheel(event) {
+            event.preventDefault();
+            fov += event.deltaY * 0.05;
+            fov = Math.max(30, Math.min(100, fov));
+            camera.fov = fov;
+            camera.updateProjectionMatrix();
+        }
+
+        function resetCamera360() {
+            lon = 0;
+            lat = 0;
+            fov = 75;
+            if (camera) {
+                camera.fov = fov;
+                camera.updateProjectionMatrix();
+            }
+        }
+
+        function animate() {
+            requestAnimationFrame(animate);
+            if (!camera || !renderer) return;
+
+            lat = Math.max(-85, Math.min(85, lat));
+            const phi = THREE.MathUtils.degToRad(90 - lat);
+            const theta = THREE.MathUtils.degToRad(lon);
+
+            const x = 500 * Math.sin(phi) * Math.cos(theta);
+            const y = 500 * Math.cos(phi);
+            const z = 500 * Math.sin(phi) * Math.sin(theta);
+
+            camera.lookAt(x, y, z);
+            renderer.render(scene, camera);
+        }
+
+        // ===== GAMBAR TITIK (tangkapan layar pemutar video) =====
+        // Gambar yang disimpan = persis tampilan viewer saat ini (sudut pandang & zoom), bukan frame 360 utuh.
+        const FOTO_MAX_W = 640;      // lebar maksimum gambar tersimpan (px), agar memori & file Excel tetap ringan
+        const FOTO_QUALITY = 0.82;   // kualitas JPEG
+
+        // Perkecil sumber gambar (canvas / <img>) ke lebar maks FOTO_MAX_W, hasil berupa data URL JPEG
+        function scaleToDataUrl(source, srcW, srcH) {
+            const scale = Math.min(1, FOTO_MAX_W / srcW);
+            const c = document.createElement('canvas');
+            c.width = Math.max(1, Math.round(srcW * scale));
+            c.height = Math.max(1, Math.round(srcH * scale));
+            c.getContext('2d').drawImage(source, 0, 0, c.width, c.height);
+            try {
+                return c.toDataURL('image/jpeg', FOTO_QUALITY);
+            } catch (e) {
+                console.warn('Gagal mengambil gambar:', e);
+                return '';
+            }
+        }
+
+        function captureViewerImage() {
+            if (!renderer || !videoElement.src || videoElement.readyState < 2) return '';
+            // Render ulang tepat sebelum dibaca: buffer WebGL tidak dipertahankan (preserveDrawingBuffer=false)
+            renderer.render(scene, camera);
+            const src = renderer.domElement;
+            return scaleToDataUrl(src, src.width, src.height);
+        }
+
+        // Gambar untuk titik yang baru dicatat: null bila checkbox "Simpan gambar layar" tidak dicentang
+        function captureFotoIfEnabled() {
+            return isChecked('chk-simpan-foto') ? captureViewerImage() : null;
+        }
+
+        // Tunggu frame video siap (setelah seek) sebelum mengambil gambar
+        function whenFrameReady(cb) {
+            if (videoElement.seeking) {
+                videoElement.addEventListener('seeked', () => requestAnimationFrame(cb), { once: true });
+            } else {
+                cb();
+            }
+        }
+
+        function resizeImageFile(file, cb) {
+            const reader = new FileReader();
+            reader.onload = ev => {
+                const img = new Image();
+                img.onload = () => cb(scaleToDataUrl(img, img.naturalWidth, img.naturalHeight));
+                img.onerror = () => cb('');
+                img.src = ev.target.result;
+            };
+            reader.readAsDataURL(file);
+        }
+
+        function showFotoSrc(src, caption) {
+            el('foto-modal-img').src = src;
+            el('foto-modal-caption').textContent = caption || '';
+            el('foto-modal').classList.remove('hidden');
+        }
+
+        function showFoto(seqNo) {
+            const a = recordedAssets.find(x => x.Seq_No === seqNo);
+            if (a && a.Foto) showFotoSrc(a.Foto, `${a.Nama_Titik} · Seq ${a.Seq_No} · Waktu video ${a.Timestamp}`);
+        }
+
+        function closeFoto() {
+            el('foto-modal').classList.add('hidden');
+            el('foto-modal-img').src = '';
+        }
+
+        document.getElementById('upload-video').addEventListener('change', function(e) {
+            const file = e.target.files[0];
+            if (file) {
+                document.getElementById('placeholder-text').style.display = 'none';
+                // Lepas URL video sebelumnya agar memori tidak bocor
+                if (videoElement.src) URL.revokeObjectURL(videoElement.src);
+                const videoUrl = URL.createObjectURL(file);
+                videoElement.src = videoUrl;
+                videoElement.load();
+                // Viewer cukup dibuat sekali: VideoTexture terikat ke elemen <video> yang sama,
+                // jadi video baru otomatis tampil tanpa membuat renderer/listener/loop baru.
+                if (!renderer) initThreeJS();
+                setPlayButtonState(false);
+                updateHeaderStatus();
+            }
+        });
+
+        function setPlayButtonState(isPlaying) {
+            btnPlayPause.innerText = isPlaying ? "Pause" : "Play";
+            btnPlayPause.classList.remove(isPlaying ? 'bg-blue-600' : 'bg-yellow-600');
+            btnPlayPause.classList.add(isPlaying ? 'bg-yellow-600' : 'bg-blue-600');
+        }
+
+        videoElement.addEventListener('ended', function() {
+            setPlayButtonState(false);
+        });
+
+        function updateHeaderStatus() {
+            const gpsCount = Object.keys(gpsDataPoints).length;
+            const hasVideo = !!videoElement.src;
+            const gpsText = document.getElementById('status-gps');
+            const gpsDot = document.getElementById('gps-dot');
+            const syncText = document.getElementById('status-sync');
+
+            if (gpsCount > 0) {
+                gpsText.innerText = `${gpsCount} titik`;
+                gpsDot.className = "w-2 h-2 rounded-full bg-emerald-500 animate-pulse";
+            } else {
+                gpsText.innerText = "Belum dimuat";
+                gpsDot.className = "w-2 h-2 rounded-full bg-slate-500";
+            }
+
+            if (hasVideo && gpsCount > 0) {
+                syncText.innerText = "Aktif";
+                syncText.className = "text-emerald-400 font-medium";
+            } else {
+                syncText.innerText = hasVideo ? "Menunggu GPS" : (gpsCount > 0 ? "Menunggu video" : "Menunggu video & GPS");
+                syncText.className = "text-amber-400 font-medium";
+            }
+        }
+
+        videoElement.addEventListener('loadedmetadata', function() {
+            seekBar.max = videoElement.duration;
+            document.getElementById('video-duration').innerText = formatSeconds(Math.floor(videoElement.duration));
+            videoElement.currentTime = 0.1;
+        });
+
+        videoElement.addEventListener('timeupdate', function() {
+            let currentSec = Math.floor(videoElement.currentTime);
+            seekBar.value = videoElement.currentTime;
+            document.getElementById('current-time').innerText = formatSeconds(currentSec);
+
+            if (gpsDataPoints[currentSec]) {
+                let coord = gpsDataPoints[currentSec];
+                document.getElementById('val-lat').innerText = coord.lat;
+                document.getElementById('val-lon').innerText = coord.lon;
+                document.getElementById('current-coord').innerText = "Tersedia ✅";
+                document.getElementById('current-coord').className = "text-green-600 font-bold";
+
+                if (!map.hasLayer(currentPosMarker)) {
+                    currentPosMarker.addTo(map);
+                }
+                currentPosMarker.setLatLng([coord.lat, coord.lon]);
+                
+                if (!videoElement.paused) {
+                    map.panTo([coord.lat, coord.lon]);
+                }
+            } else {
+                document.getElementById('current-coord').innerText = "Mencari koordinat terdekat...";
+                document.getElementById('current-coord').className = "text-orange-500 font-bold";
+            }
+        });
+
+        function togglePlay() {
+            if (!videoElement.src) return;
+            if (videoElement.paused) {
+                videoElement.play();
+                setPlayButtonState(true);
+            } else {
+                videoElement.pause();
+                setPlayButtonState(false);
+            }
+        }
+
+        function stepVideo(seconds) {
+            if (!videoElement.src) return;
+            videoElement.currentTime = Math.max(0, Math.min(videoElement.duration, videoElement.currentTime + seconds));
+        }
+
+        seekBar.addEventListener('input', function() {
+            videoElement.currentTime = parseFloat(seekBar.value);
+        });
+
+        document.addEventListener('keydown', function(e) {
+            // Saat pratinjau gambar / jendela edit terbuka: Esc menutup, shortcut video dinonaktifkan
+            if (!el('foto-modal').classList.contains('hidden')) {
+                if (e.key === 'Escape') closeFoto();
+                return;
+            }
+            if (!el('edit-modal').classList.contains('hidden')) {
+                if (e.key === 'Escape') closeEdit();
+                return;
+            }
+            if (['INPUT', 'SELECT', 'TEXTAREA'].includes(document.activeElement.tagName) && document.activeElement.type !== 'range') {
+                return;
+            }
+            if (e.code === 'Space') {
+                e.preventDefault();
+                togglePlay();
+            } else if (e.code === 'ArrowLeft') {
+                e.preventDefault();
+                stepVideo(-1);
+            } else if (e.code === 'ArrowRight') {
+                e.preventDefault();
+                stepVideo(1);
+            }
+        });
+
+        function formatSeconds(sec) {
+            let h = String(Math.floor(sec / 3600)).padStart(2, '0');
+            let m = String(Math.floor((sec % 3600) / 60)).padStart(2, '0');
+            let s = String(sec % 60).padStart(2, '0');
+            return `${h}:${m}:${s}`;
+        }
+
+        document.getElementById('upload-gps').addEventListener('change', function(e) {
+            const file = e.target.files[0];
+            if (!file) return;
+            const reader = new FileReader();
+            reader.onload = function(evt) {
+                const text = evt.target.result;
+                if (file.name.endsWith('.srt')) {
+                    gpsDataPoints = parseSRT(text);
+                } else if (file.name.endsWith('.gpx')) {
+                    gpsDataPoints = parseGPX(text);
+                }
+                const keys = Object.keys(gpsDataPoints);
+                const validCount = keys.length;
+                updateHeaderStatus();
+
+                if (validCount === 0) {
+                    alert("Tidak ada koordinat yang terbaca dari file GPS ini. Periksa format SRT/GPX-nya.");
+                } else {
+                    const firstCoord = gpsDataPoints[keys[0]];
+                    map.setView([firstCoord.lat, firstCoord.lon], 18);
+                    currentPosMarker.setLatLng([firstCoord.lat, firstCoord.lon]).addTo(map);
+                }
+            };
+            reader.readAsText(file);
+        });
+
+        document.getElementById('upload-csv').addEventListener('change', function(e) {
+            const file = e.target.files[0];
+            if (!file) return;
+            const reader = new FileReader();
+            reader.onload = function(evt) {
+                parseCSVToDropdown(evt.target.result);
+            };
+            reader.readAsText(file);
+        });
+
+        function parseSRT(data) {
+            let points = [];
+            const blocks = data.split(/\r?\n\r?\n/);
+            for (let block of blocks) {
+                let lines = block.split(/\r?\n/);
+                if (lines.length >= 3) {
+                    let timeLine = lines[1];
+                    let matchTime = timeLine.match(/(\d{2}):(\d{2}):(\d{2}),(\d{3})/);
+                    if (matchTime) {
+                        let hours = parseInt(matchTime[1]);
+                        let minutes = parseInt(matchTime[2]);
+                        let seconds = parseInt(matchTime[3]);
+                        let totalSeconds = hours * 3600 + minutes * 60 + seconds;
+
+                        let textBlock = lines.slice(2).join(" ");
+                        let latMatch = textBlock.match(/latitude\s*:\s*([-\d.]+)/i);
+                        let lonMatch = textBlock.match(/longitude\s*:\s*([-\d.]+)/i);
+                        let altMatch = textBlock.match(/altitude\s*:\s*([-\d.]+)/i);
+
+                        if (latMatch && lonMatch) {
+                            points[totalSeconds] = {
+                                lat: parseFloat(latMatch[1]),
+                                lon: parseFloat(lonMatch[1]),
+                                alt: altMatch ? parseFloat(altMatch[1]) : 0
+                            };
+                        }
+                    }
+                }
+            }
+            return points;
+        }
+
+        function parseGPX(data) {
+            let points = [];
+            const parser = new DOMParser();
+            const xmlDoc = parser.parseFromString(data, "text/xml");
+            const trkpts = xmlDoc.getElementsByTagName("trkpt");
+            
+            let startTime = 0;
+            for (let i = 0; i < trkpts.length; i++) {
+                let pt = trkpts[i];
+                let lat = parseFloat(pt.getAttribute("lat"));
+                let lon = parseFloat(pt.getAttribute("lon"));
+                let eleNode = pt.getElementsByTagName("ele")[0];
+                let timeNode = pt.getElementsByTagName("time")[0];
+                let ele = eleNode ? parseFloat(eleNode.textContent) : 0;
+                
+                if (timeNode) {
+                    let timeSec = new Date(timeNode.textContent).getTime() / 1000;
+                    if (i === 0) startTime = timeSec;
+                    let videoSec = Math.floor(timeSec - startTime);
+                    if (videoSec >= 0) {
+                        points[videoSec] = { lat, lon, alt: ele };
+                    }
+                }
+            }
+            return points;
+        }
+
+        function fillCategorySelect(jenis, categories) {
+            const select = document.getElementById(`${jenis.toLowerCase()}-konstruksi`);
+            select.innerHTML = `<option value="">-- Pilih Konstruksi ${jenis} --</option>`;
+            categories.forEach(category => {
+                const opt = document.createElement('option');
+                opt.value = category;
+                opt.textContent = category;
+                select.appendChild(opt);
+            });
+        }
+
+        // Mendukung 2 format CSV:
+        //   a) 2 kolom  -> "JTM,TM-1" / "JTR,TR-1" (baris header / jenis tak dikenal dilewati)
+        //   b) 1 kolom  -> "TM-1"  (dimuat ke JTM dan JTR sekaligus)
+        function parseCSVToDropdown(csvText) {
+            const rows = csvText.replace(/^﻿/, '')
+                .split(/\r?\n/)
+                .map(line => line.split(/[;,]/).map(cell => cell.trim().replace(/^"|"$/g, '')))
+                .filter(row => row[0]);
+
+            const getJenis = cell => {
+                const upper = cell.toUpperCase();
+                return (upper === 'JTM' || upper === 'JTR') ? upper : null;
+            };
+            const isTwoColumn = rows.some(row => row.length >= 2 && getJenis(row[0]) && row[1]);
+            const result = { JTM: [], JTR: [] };
+
+            rows.forEach(row => {
+                if (isTwoColumn) {
+                    const jenis = getJenis(row[0]);
+                    if (jenis && row[1] && !result[jenis].includes(row[1])) result[jenis].push(row[1]);
+                } else {
+                    ['JTM', 'JTR'].forEach(j => {
+                        if (!result[j].includes(row[0])) result[j].push(row[0]);
+                    });
+                }
+            });
+
+            fillCategorySelect('JTM', result.JTM);
+            fillCategorySelect('JTR', result.JTR);
+
+            alert(isTwoColumn
+                ? `Kategori dimuat: ${result.JTM.length} untuk JTM, ${result.JTR.length} untuk JTR.`
+                : `Kategori dimuat (format 1 kolom): ${result.JTM.length} kategori dipakai untuk JTM dan JTR.`);
+        }
+
+        function loadDefaultCategories() {
+            fillCategorySelect('JTM', DEFAULT_CATEGORIES.JTM);
+            fillCategorySelect('JTR', DEFAULT_CATEGORIES.JTR);
+            alert("Kategori bawaan JTM & JTR berhasil dimuat!");
+        }
+
+        // Koordinat GPS pada detik video saat ini (atau detik terdekat yang punya data)
+        function getCoordAtCurrentTime() {
+            if (!videoElement.src) {
+                alert("Harap muat file video 360 terlebih dahulu!");
+                return null;
+            }
+            const currentSec = Math.floor(videoElement.currentTime);
+            let coord = gpsDataPoints[currentSec];
+
+            if (!coord) {
+                const availableSecs = Object.keys(gpsDataPoints);
+                if (availableSecs.length === 0) {
+                    alert("Harap unggah file SRT/GPX terlebih dahulu!");
+                    return null;
+                }
+                const closestSec = availableSecs.reduce((prev, curr) => Math.abs(curr - currentSec) < Math.abs(prev - currentSec) ? curr : prev);
+                coord = gpsDataPoints[closestSec];
+            }
+            return coord;
+        }
+
+        function positionFromCoord(coord) {
+            return {
+                Latitude: coord.lat,
+                Longitude: coord.lon,
+                Altitude: coord.alt,
+                // Simpan koordinat asli GPS untuk pembanding
+                Orig_Lat: coord.lat,
+                Orig_Lon: coord.lon,
+                Status_Koordinat: "Asli (GPS)",
+                Timestamp: el('current-time').innerText
+            };
+        }
+
+        function saveGarduPoint() {
+            const name = el('jtr-gardu').value.trim();
+            if (!name) {
+                alert("Nama Gardu Sumber belum diisi!");
+                return;
+            }
+            const coord = getCoordAtCurrentTime();
+            if (!coord) return;
+
+            const existing = findGardu(name);
+            const foto = captureFotoIfEnabled();
+            if (existing) {
+                if (!confirm(`Posisi ${name} sudah pernah dicatat. Perbarui ke posisi pada detik ini?`)) return;
+                Object.assign(existing, positionFromCoord(coord));
+                if (foto !== null) existing.Foto = foto;   // gambar lama dipertahankan bila checkbox tidak dicentang
+            } else {
+                recordedAssets.push({
+                    Seq_No: seqCounter++,
+                    Tipe: 'GARDU',
+                    Jenis_Tiang: 'Gardu',
+                    Nama_Titik: name,
+                    Kat_Konstruksi: '',
+                    Sirkit: [],
+                    Foto: foto || '',
+                    ...positionFromCoord(coord)
+                });
+            }
+
+            updateTable();
+            renderAssetMarkers();
+            refreshAllCircuits();
+            map.setView([coord.lat, coord.lon], 19);
+        }
+
+        function saveAssetPoint() {
+            const contexts = getActiveCircuitKeys().map(getCircuitContext);
+
+            // Validasi isian sirkit
+            for (const ctx of contexts) {
+                if (!ctx.valid) {
+                    alert(ctx.jenis === 'JTM' ? "Nama penyulang belum diisi!" : "Nama Gardu Sumber belum diisi!");
+                    el(ctx.jenis === 'JTM' ? `${ctx.key}-group` : 'jtr-gardu').focus();
+                    return;
+                }
+            }
+            const penyulangList = contexts.filter(c => c.jenis === 'JTM').map(c => c.penyulang);
+            if (new Set(penyulangList).size !== penyulangList.length) {
+                alert("Nama penyulang pada tiang underbuilt tidak boleh sama.");
+                return;
+            }
+
+            const coord = getCoordAtCurrentTime();
+            if (!coord) return;
+
+            // Bentuk data tiap sirkit; ID dihitung ulang dari segmen aktif agar selalu sesuai urutan terbaru
+            const sirkit = contexts.map(ctx => {
+                const segId = el(`${ctx.key}-segmen`).value || MAIN_SEG;
+                const id = nextTiangId(ctx.jenis, ctx.group, segId);
+                // No_Urut = urutan tiang di garis/segmennya (dipakai untuk menggambar garis).
+                // JTM: sama dengan nomor pada ID; JTR: urutan di jalur, terpisah dari nomor ID berjalan.
+                const no = ctx.jenis === 'JTM'
+                    ? parseInt(id.slice(idPrefix(ctx.jenis, ctx.group, segId).length), 10)
+                    : nextNumber(ctx.jenis, ctx.group, segId);
+                const m = {
+                    Jenis: ctx.jenis,
+                    Group: ctx.group,
+                    Segmen: segId,
+                    No_Urut: no,
+                    ID_Tiang: id
+                };
+                if (ctx.jenis === 'JTM') {
+                    m.Penyulang = ctx.penyulang;
+                } else {
+                    m.Gardu_Sumber = ctx.gardu;
+                    m.Jurusan = ctx.jurusan;
+                }
+                return m;
+            });
+
+            const hasJTM = sirkit.some(m => m.Jenis === 'JTM');
+            const hasJTR = sirkit.some(m => m.Jenis === 'JTR');
+
+            const pole = {
+                Seq_No: seqCounter++,
+                Tipe: 'TIANG',
+                Jenis_Tiang: !hasJTM ? 'TR' : (sirkit.length > 1 ? 'TM Underbuilt' : 'TM'),
+                Nama_Titik: sirkit.map(sirkitLabel).join(' + '),
+                Kat_Konstruksi: el(hasJTM ? 'jtm-konstruksi' : 'jtr-konstruksi').value,
+                LBS: hasJTM && el('jtm-chk-lbs').checked ? 1 : 0,
+                Gardu_Distribusi: hasJTM && el('jtm-chk-gardu').checked ? 1 : 0,
+                Jumlah_SR: hasJTR ? Math.max(0, parseInt(el('jtr-jumlah-sr').value, 10) || 0) : 0,
+                Sirkit: sirkit,
+                Foto: captureFotoIfEnabled() || '',
+                ...positionFromCoord(coord)
+            };
+
+            recordedAssets.push(pole);
+            updateTable();
+            renderAssetMarkers();
+            map.setView([pole.Latitude, pole.Longitude], 19);
+
+            // Siapkan form untuk tiang berikutnya. Pilihan underbuilt, penyulang, gardu, jurusan,
+            // segmen, dan kategori dipertahankan karena biasanya sama untuk tiang berikutnya.
+            el('jtm-chk-lbs').checked = false;
+            el('jtm-chk-gardu').checked = false;
+            if (hasJTR) el('jtr-jumlah-sr').value = 0;
+
+            const selectParents = {};
+            contexts.forEach((ctx, i) => { selectParents[ctx.key] = sirkit[i].ID_Tiang; });
+            refreshAllCircuits(selectParents);
+        }
+
+        function updateTable() {
+            const tbody = document.getElementById('table-body');
+            document.getElementById('count-data').innerText = recordedAssets.length;
+
+            if (recordedAssets.length === 0) {
+                tbody.innerHTML = `<tr><td colspan="6" class="p-3 text-center text-gray-400">Belum ada data dicatat.</td></tr>`;
+                return;
+            }
+
+            tbody.innerHTML = recordedAssets.map((item, index) => {
+                // Tentukan warna badge status
+                const badgeClass = item.Status_Koordinat.includes("Digeser")
+                    ? "bg-amber-100 text-amber-800 border-amber-300"
+                    : "bg-green-100 text-green-800 border-green-300";
+
+                return `<tr class="border-b hover:bg-blue-50 transition">
+                    <td class="p-1.5 border">${item.Seq_No}</td>
+                    <td class="p-1.5 border">
+                        <div class="flex items-center gap-1 mb-0.5">
+                            <span class="px-1 rounded border text-[9px] font-bold ${(TIANG_STYLE[item.Jenis_Tiang] || TIANG_STYLE.TM).badge}">${item.Jenis_Tiang}</span>
+                            <span class="text-[10px] text-gray-500">${item.Tipe === 'GARDU' ? '' : (esc(item.Kat_Konstruksi) || 'Tanpa kategori')}</span>
+                        </div>
+                        ${describeAsset(item)}
+                    </td>
+                    <td class="p-1.5 border text-center">
+                        ${item.Foto
+                            ? `<img src="${item.Foto}" alt="Gambar titik" class="w-28 max-w-none inline-block rounded border cursor-pointer hover:opacity-80" title="Klik untuk memperbesar" onclick="showFoto(${item.Seq_No})">`
+                            : `<span class="text-[10px] text-gray-400">Tanpa gambar</span>`}
+                    </td>
+                    <td class="p-1.5 border font-mono text-[11px]">
+                        ${item.Latitude},<br>${item.Longitude}
+                    </td>
+                    <td class="p-1.5 border text-center">
+                        <span class="px-2 py-0.5 rounded-full text-[10px] font-semibold border ${badgeClass}">
+                            ${item.Status_Koordinat}
+                        </span>
+                    </td>
+                    <td class="p-1.5 border text-center space-x-1 whitespace-nowrap">
+                        <button onclick="focusOnAsset(${item.Seq_No})" class="bg-blue-100 hover:bg-blue-200 text-blue-700 px-1.5 py-0.5 rounded font-semibold" title="Lihat & Geser di Peta">📍 Peta</button>
+                        <button onclick="openEdit(${item.Seq_No})" class="bg-amber-100 hover:bg-amber-200 text-amber-800 px-1.5 py-0.5 rounded font-semibold" title="Ubah data titik ini">✏️ Edit</button>
+                        <button onclick="deleteRow(${index})" class="bg-red-100 hover:bg-red-200 text-red-700 px-1.5 py-0.5 rounded font-semibold">Hapus</button>
+                    </td>
+                </tr>`;
+            }).join('');
+        }
+
+        // Satu baris per sirkit: [JTM] T12 · Penyulang-01 · Segmen Utama
+        function describeAsset(item) {
+            if (item.Tipe === 'GARDU') {
+                return `<div class="font-bold text-gray-800">${esc(item.Nama_Titik)} <span class="font-normal text-[10px] text-gray-500">· titik awal JTR</span></div>`;
+            }
+            return item.Sirkit.map(m => {
+                const info = segmentInfo(m);
+                const grup = m.Jenis === 'JTM'
+                    ? `${m.Penyulang} · Segmen ${info.Nama_Segmen}`
+                    : `${m.Gardu_Sumber} / Jur. ${m.Jurusan}`;
+                const asal = m.Segmen !== MAIN_SEG && info.Berawal_Dari ? ` (dari ${info.Berawal_Dari})` : '';
+                return `<div class="flex items-center gap-1">
+                    <span class="px-1 rounded border text-[9px] font-bold ${JARINGAN_STYLE[m.Jenis].badge}">${m.Jenis}</span>
+                    <span class="font-bold text-gray-800 font-mono">${esc(m.ID_Tiang)}</span>
+                    <span class="text-[10px] text-gray-500">· ${esc(grup + asal)}</span>
+                </div>`;
+            }).join('');
+        }
+
+        function deleteRow(index) {
+            recordedAssets.splice(index, 1);
+            updateTable();
+            renderAssetMarkers();
+            refreshAllCircuits();
+        }
+
+        function clearData() {
+            if (confirm("Reset semua data yang sudah dicatat?")) {
+                recordedAssets = [];
+                segments = [];
+                mainSegNames = {};
+                seqCounter = 1;
+                updateTable();
+                renderAssetMarkers();
+                refreshAllCircuits();
+            }
+        }
+
+        // ===== EDIT DATA TERCATAT =====
+        let editingSeq = null;
+        const editingItem = () => recordedAssets.find(a => a.Seq_No === editingSeq);
+
+        function grupLabel(m) {
+            return m.Jenis === 'JTM' ? m.Penyulang : `${m.Gardu_Sumber} / Jurusan ${m.Jurusan}`;
+        }
+
+        function selectOptionsOf(id) {
+            return [...el(id).options].map(o => o.value).filter(Boolean);
+        }
+
+        function openEdit(seqNo) {
+            const item = recordedAssets.find(a => a.Seq_No === seqNo);
+            if (!item) return;
+            editingSeq = seqNo;
+            const LBL = 'block text-[11px] font-semibold text-gray-600';
+            const INP = 'w-full text-xs border rounded p-1.5';
+            let html = '';
+
+            if (item.Tipe === 'GARDU') {
+                html += `<div>
+                    <label class="${LBL}">Nama Gardu Sumber</label>
+                    <input type="text" id="ed-nama" value="${esc(item.Nama_Titik)}" class="${INP}">
+                    <p class="text-[10px] text-gray-500 mt-0.5">Nama baru ikut diterapkan ke semua tiang JTR dari gardu ini.</p>
+                </div>`;
+            } else {
+                html += item.Sirkit.map((m, i) => {
+                    const opts = [MAIN_SEG, ...segmentsOf(m.Jenis, m.Group).map(s => s.segId)]
+                        .map(id => `<option value="${id}" ${id === m.Segmen ? 'selected' : ''}>${esc(segmentOptionLabel(m.Jenis, m.Group, id))}</option>`)
+                        .join('');
+                    return `<div class="border rounded p-2 space-y-1.5 ${m.Jenis === 'JTM' ? 'border-red-200 bg-red-50/40' : 'border-orange-200 bg-orange-50/40'}">
+                        <div class="flex items-center gap-1 font-semibold">
+                            <span class="px-1 rounded border text-[9px] font-bold ${JARINGAN_STYLE[m.Jenis].badge}">${m.Jenis}</span>
+                            ${esc(grupLabel(m))}
+                        </div>
+                        <div class="grid grid-cols-[2fr_1fr_1fr] gap-2">
+                            <div>
+                                <label class="${LBL}">${m.Jenis === 'JTM' ? 'Segmen' : 'Jalur'}</label>
+                                <select id="ed-seg-${i}" class="${INP} bg-white" onchange="onEditSegChange(${i})">${opts}</select>
+                            </div>
+                            <div>
+                                <label class="${LBL}">${m.Jenis === 'JTM' ? 'No. Urut' : 'Urutan di Jalur'}</label>
+                                <input type="number" min="1" step="1" id="ed-no-${i}" value="${m.No_Urut}" class="${INP}" oninput="onEditNoChange(${i})">
+                            </div>
+                            <div>
+                                <label class="${LBL}">ID Tiang</label>
+                                <input type="text" id="ed-id-${i}" value="${esc(m.ID_Tiang)}" class="${INP} font-mono font-bold">
+                            </div>
+                        </div>
+                    </div>`;
+                }).join('');
+                html += `<p class="text-[10px] text-gray-500">JTM: mengganti ID tiang ikut mengganti ID cabangnya, mis. T4 → T5 membuat T4.1 → T5.1.
+                    JTR: ID memakai nomor berjalan per jurusan; "Urutan di Jalur" hanya mengatur urutan garis, tidak mengubah ID.</p>`;
+
+                const hasJTM = item.Sirkit.some(m => m.Jenis === 'JTM');
+                const hasJTR = item.Sirkit.some(m => m.Jenis === 'JTR');
+                const cats = [...new Set([
+                    ...selectOptionsOf('jtm-konstruksi'), ...selectOptionsOf('jtr-konstruksi'),
+                    ...DEFAULT_CATEGORIES.JTM, ...DEFAULT_CATEGORIES.JTR
+                ])];
+                html += `<div class="grid grid-cols-2 gap-2">
+                    <div>
+                        <label class="${LBL}">Kategori Konstruksi</label>
+                        <input type="text" id="ed-kat" list="ed-kat-list" value="${esc(item.Kat_Konstruksi)}" class="${INP}" placeholder="Pilih / ketik kategori">
+                        <datalist id="ed-kat-list">${cats.map(c => `<option value="${esc(c)}">`).join('')}</datalist>
+                    </div>
+                    <div class="flex flex-wrap items-end gap-3 pb-1.5">
+                        ${hasJTM ? `<label class="flex items-center gap-1 cursor-pointer"><input type="checkbox" id="ed-lbs" ${item.LBS ? 'checked' : ''}> LBS</label>
+                        <label class="flex items-center gap-1 cursor-pointer"><input type="checkbox" id="ed-gardu" ${item.Gardu_Distribusi ? 'checked' : ''}> Gardu Distribusi</label>` : ''}
+                        ${hasJTR ? `<label class="flex items-center gap-1">Jumlah SR <input type="number" min="0" step="1" id="ed-sr" value="${item.Jumlah_SR || 0}" class="w-16 text-xs border rounded p-1"></label>` : ''}
+                    </div>
+                </div>`;
+            }
+
+            html += `<div class="grid grid-cols-2 gap-2">
+                <div><label class="${LBL}">Latitude</label><input type="number" step="any" id="ed-lat" value="${item.Latitude}" class="${INP} font-mono"></div>
+                <div><label class="${LBL}">Longitude</label><input type="number" step="any" id="ed-lon" value="${item.Longitude}" class="${INP} font-mono"></div>
+            </div>`;
+
+            // Gambar titik: ambil ulang dari layar video, unggah file, atau hapus
+            html += `<div class="border rounded p-2 bg-gray-50">
+                <label class="${LBL} mb-1">📷 Gambar titik <span class="font-normal text-gray-500">(waktu video ${esc(item.Timestamp)})</span></label>
+                <div class="flex gap-3 items-start">
+                    <div id="ed-foto-wrap" class="shrink-0"></div>
+                    <div class="flex flex-col gap-1 text-[11px]">
+                        <button type="button" onclick="editSeekVideo()" class="bg-gray-200 hover:bg-gray-300 text-gray-800 font-bold px-2 py-1 rounded text-left">⏩ Lompat ke waktu video titik ini</button>
+                        <button type="button" onclick="editFotoCapture()" class="bg-blue-100 hover:bg-blue-200 text-blue-800 border border-blue-300 font-bold px-2 py-1 rounded text-left">📷 Ambil dari layar video sekarang</button>
+                        <label class="bg-green-100 hover:bg-green-200 text-green-800 border border-green-300 font-bold px-2 py-1 rounded cursor-pointer">📁 Unggah gambar dari file
+                            <input type="file" accept="image/*" class="hidden" onchange="editFotoUpload(this)">
+                        </label>
+                        <button type="button" onclick="editFotoRemove()" class="bg-red-100 hover:bg-red-200 text-red-700 border border-red-300 font-bold px-2 py-1 rounded text-left">🗑️ Hapus gambar</button>
+                        <p class="text-[10px] text-gray-500">Atur sudut pandang & zoom pada pemutar video sebelum membuka jendela edit, lalu klik "Ambil dari layar video sekarang".</p>
+                    </div>
+                </div>
+            </div>`;
+
+            el('edit-title').textContent = `✏️ Edit Data · Seq ${item.Seq_No} (${item.Jenis_Tiang})`;
+            el('edit-body').innerHTML = html;
+            editFoto = undefined;
+            renderEditFoto();
+            el('edit-modal').classList.remove('hidden');
+        }
+
+        // ===== GAMBAR PADA JENDELA EDIT =====
+        let editFoto;   // undefined = tidak diubah, '' = dihapus, string = gambar baru (data URL)
+
+        function renderEditFoto() {
+            const item = editingItem();
+            const wrap = el('ed-foto-wrap');
+            if (!item || !wrap) return;
+            const src = editFoto === undefined ? item.Foto : editFoto;
+            wrap.innerHTML = src
+                ? `<img src="${src}" alt="Gambar titik" class="w-44 rounded border cursor-pointer hover:opacity-80" title="Klik untuk memperbesar" onclick="showFotoSrc(this.src, 'Pratinjau gambar · Seq ${item.Seq_No}')">
+                   ${editFoto !== undefined ? '<p class="text-[10px] text-blue-700 font-semibold mt-0.5">Gambar baru (belum disimpan)</p>' : ''}`
+                : `<div class="w-44 h-24 flex items-center justify-center rounded border border-dashed text-[10px] text-gray-400 bg-white">Belum ada gambar</div>
+                   ${editFoto === '' && item.Foto ? '<p class="text-[10px] text-red-600 font-semibold mt-0.5">Gambar akan dihapus saat disimpan</p>' : ''}`;
+        }
+
+        function timestampToSeconds(ts) {
+            const p = String(ts || '').split(':').map(Number);
+            return p.length === 3 && p.every(isFinite) ? p[0] * 3600 + p[1] * 60 + p[2] : null;
+        }
+
+        function editSeekVideo() {
+            const item = editingItem();
+            if (!item) return;
+            if (!videoElement.src) { alert("Video belum dimuat."); return; }
+            const sec = timestampToSeconds(item.Timestamp);
+            if (sec === null) { alert("Waktu video titik ini tidak tersedia."); return; }
+            videoElement.pause();
+            setPlayButtonState(false);
+            videoElement.currentTime = Math.min(sec, videoElement.duration || sec);
+        }
+
+        function editFotoCapture() {
+            if (!renderer || !videoElement.src) { alert("Video belum dimuat, gambar tidak bisa diambil."); return; }
+            whenFrameReady(() => {
+                const f = captureViewerImage();
+                if (!f) { alert("Gagal mengambil gambar dari layar video."); return; }
+                editFoto = f;
+                renderEditFoto();
+            });
+        }
+
+        function editFotoUpload(input) {
+            const file = input.files && input.files[0];
+            input.value = '';
+            if (!file) return;
+            resizeImageFile(file, f => {
+                if (!f) { alert("File gambar tidak bisa dibaca."); return; }
+                editFoto = f;
+                renderEditFoto();
+            });
+        }
+
+        function editFotoRemove() {
+            editFoto = '';
+            renderEditFoto();
+        }
+
+        function onEditSegChange(i) {
+            const m = editingItem().Sirkit[i];
+            const segId = el(`ed-seg-${i}`).value;
+            const no = segId === m.Segmen ? m.No_Urut : nextNumber(m.Jenis, m.Group, segId, m);
+            el(`ed-no-${i}`).value = no;
+            if (m.Jenis === 'JTR') return;   // ID JTR (nomor berjalan) tidak ikut berubah saat pindah jalur
+            el(`ed-id-${i}`).value = idPrefix(m.Jenis, m.Group, segId) + no;
+        }
+
+        function onEditNoChange(i) {
+            const m = editingItem().Sirkit[i];
+            if (m.Jenis === 'JTR') return;
+            const no = parseInt(el(`ed-no-${i}`).value, 10);
+            if (no > 0) el(`ed-id-${i}`).value = idPrefix(m.Jenis, m.Group, el(`ed-seg-${i}`).value) + no;
+        }
+
+        function closeEdit() {
+            editingSeq = null;
+            editFoto = undefined;
+            el('edit-modal').classList.add('hidden');
+        }
+
+        // Ganti ID tiang beserta turunannya (cabang dari tiang itu) pada grup yang sama
+        function renameTiangId(jenis, group, oldId, newId) {
+            const swap = id => id === oldId ? newId
+                : (id.startsWith(oldId + '.') || id.startsWith(oldId + '/')) ? newId + id.slice(oldId.length)
+                : id;
+            membersOf(jenis, group).forEach(x => { x.m.ID_Tiang = swap(x.m.ID_Tiang); });
+            segmentsOf(jenis, group).forEach(s => { if (s.parent) s.parent = swap(s.parent); });
+        }
+
+        function garduNameUsed(name) {
+            return !!findGardu(name) || recordedAssets.some(p => (p.Sirkit || []).some(m => m.Jenis === 'JTR' && m.Gardu_Sumber === name));
+        }
+
+        function renameGardu(oldName, newName) {
+            findGardu(oldName).Nama_Titik = newName;
+            recordedAssets.forEach(p => (p.Sirkit || []).forEach(m => {
+                if (m.Jenis === 'JTR' && m.Gardu_Sumber === oldName) {
+                    m.Gardu_Sumber = newName;
+                    m.Group = `${newName}|${m.Jurusan}`;
+                }
+            }));
+            segments.forEach(s => {
+                if (s.jenis === 'JTR' && groupGardu(s.group) === oldName) s.group = `${newName}|${groupJurusan(s.group)}`;
+            });
+            if (el('jtr-gardu').value.trim() === oldName) el('jtr-gardu').value = newName;
+        }
+
+        function applyEdit() {
+            const item = editingItem();
+            if (!item) return closeEdit();
+
+            const lat = parseFloat(el('ed-lat').value);
+            const lon = parseFloat(el('ed-lon').value);
+            if (!isFinite(lat) || !isFinite(lon) || Math.abs(lat) > 90 || Math.abs(lon) > 180) {
+                alert("Koordinat tidak valid.");
+                return;
+            }
+
+            if (item.Tipe === 'GARDU') {
+                const name = el('ed-nama').value.trim();
+                if (!name) {
+                    alert("Nama gardu tidak boleh kosong.");
+                    return;
+                }
+                if (name !== item.Nama_Titik) {
+                    if (garduNameUsed(name)) {
+                        alert(`Nama gardu "${name}" sudah dipakai.`);
+                        return;
+                    }
+                    renameGardu(item.Nama_Titik, name);
+                }
+            } else {
+                // Validasi semua sirkit dulu, baru diterapkan
+                const changes = item.Sirkit.map((m, i) => ({
+                    m,
+                    segId: el(`ed-seg-${i}`).value,
+                    no: parseInt(el(`ed-no-${i}`).value, 10),
+                    id: el(`ed-id-${i}`).value.trim()
+                }));
+                for (const c of changes) {
+                    if (!c.id || !(c.no > 0)) {
+                        alert("ID Tiang dan No. Urut wajib diisi (No. Urut minimal 1).");
+                        return;
+                    }
+                    if (idExists(c.m.Jenis, c.m.Group, c.id, c.m)) {
+                        alert(`ID ${c.id} sudah dipakai tiang lain pada ${grupLabel(c.m)}.`);
+                        return;
+                    }
+                }
+                changes.forEach(c => {
+                    c.m.Segmen = c.segId;
+                    c.m.No_Urut = c.no;
+                    if (c.id !== c.m.ID_Tiang) renameTiangId(c.m.Jenis, c.m.Group, c.m.ID_Tiang, c.id);
+                });
+
+                item.Kat_Konstruksi = el('ed-kat').value.trim();
+                if (el('ed-lbs')) item.LBS = el('ed-lbs').checked ? 1 : 0;
+                if (el('ed-gardu')) item.Gardu_Distribusi = el('ed-gardu').checked ? 1 : 0;
+                if (el('ed-sr')) item.Jumlah_SR = Math.max(0, parseInt(el('ed-sr').value, 10) || 0);
+            }
+
+            if (lat !== item.Latitude || lon !== item.Longitude) {
+                item.Latitude = lat;
+                item.Longitude = lon;
+                item.Status_Koordinat = (lat !== item.Orig_Lat || lon !== item.Orig_Lon) ? "Telah Digeser (Manual)" : "Asli (GPS)";
+            }
+
+            if (editFoto !== undefined) item.Foto = editFoto;
+
+            // Nama titik bisa berubah karena ganti ID (termasuk tiang lain yang ikut terganti)
+            recordedAssets.forEach(p => {
+                if (p.Tipe === 'TIANG') p.Nama_Titik = p.Sirkit.map(sirkitLabel).join(' + ');
+            });
+
+            closeEdit();
+            updateTable();
+            renderAssetMarkers();
+            refreshAllCircuits();
+        }
+
+        // Ukuran gambar di sel Excel (px). Tinggi mengikuti rasio gambar.
+        const EXCEL_IMG_W = 160;
+
+        async function exportToExcel() {
+            if (recordedAssets.length === 0) {
+                alert("Belum ada data untuk diexport!");
+                return;
+            }
+            if (typeof ExcelJS === 'undefined') {
+                alert("Pustaka ExcelJS belum termuat. Pastikan ada koneksi internet saat halaman dibuka, lalu muat ulang halaman.");
+                return;
+            }
+            const COORD_COLS = ['Latitude', 'Longitude', 'Altitude', 'Orig_Lat', 'Orig_Lon', 'Status_Koordinat', 'Timestamp'];
+            const pick = (obj, cols) => Object.fromEntries(cols.map(c => [c, obj[c] !== undefined && obj[c] !== '' ? obj[c] : null]));
+            const poles = recordedAssets.filter(p => p.Tipe === 'TIANG');
+            const round1 = x => Math.round(x * 10) / 10;
+
+            // Kolom "Gambar": teks "-" bila tidak ada gambar; gambarnya sendiri disisipkan ke sel saat menulis sheet.
+            // __foto tidak ikut menjadi kolom (hanya dipakai untuk menyisipkan gambar).
+            const withFoto = (p, obj, cols) => ({ ...pick({ ...obj, Gambar: p.Foto ? '' : '-' }, cols), __foto: p.Foto || '' });
+
+            // Satu baris per sirkit; Seq_No menghubungkan baris-baris dari tiang fisik yang sama
+            const sirkitRows = (jenis, cols) => poles.flatMap(p => p.Sirkit
+                .filter(m => m.Jenis === jenis)
+                .map(m => {
+                    const info = segmentInfo(m);
+                    return withFoto(p, { ...p, ...m, ...info, Jalur: info.Nama_Segmen, Jumlah_Sirkit: p.Sirkit.length }, cols);
+                }));
+
+            const FISIK_COLS = ['Seq_No', 'Jenis_Tiang', 'Nama_Titik', 'Jumlah_Sirkit', 'Kat_Konstruksi', 'LBS', 'Gardu_Distribusi', 'Jumlah_SR', ...COORD_COLS, 'Gambar'];
+            const JTM_COLS = ['Seq_No', 'ID_Tiang', 'Penyulang', 'Nama_Segmen', 'No_Urut', 'Berawal_Dari', 'Line_ID', 'Jenis_Tiang', 'Jumlah_Sirkit', 'Kat_Konstruksi', 'LBS', 'Gardu_Distribusi', ...COORD_COLS, 'Gambar'];
+            const JTR_COLS = ['Seq_No', 'ID_Tiang', 'Gardu_Sumber', 'Jurusan', 'Jalur', 'No_Urut', 'Berawal_Dari', 'Line_ID', 'Jenis_Tiang', 'Jumlah_Sirkit', 'Kat_Konstruksi', 'Jumlah_SR', ...COORD_COLS, 'Gambar'];
+            const GARDU_COLS = ['Seq_No', 'Nama_Titik', ...COORD_COLS, 'Gambar'];
+            const lines = buildLines();
+
+            const sheets = [
+                {
+                    name: 'Tiang Fisik',
+                    cols: FISIK_COLS,
+                    rows: poles.map(p => withFoto(p, { ...p, Jumlah_Sirkit: p.Sirkit.length }, FISIK_COLS))
+                },
+                { name: 'Tiang JTM', cols: JTM_COLS, rows: sirkitRows('JTM', JTM_COLS) },
+                { name: 'Tiang JTR', cols: JTR_COLS, rows: sirkitRows('JTR', JTR_COLS) },
+                {
+                    name: 'Gardu Sumber',
+                    cols: GARDU_COLS,
+                    rows: recordedAssets.filter(p => p.Tipe === 'GARDU').map(p => withFoto(p, p, GARDU_COLS))
+                },
+                {
+                    // Ringkasan segmen JTM per penyulang
+                    name: 'Segmen JTM',
+                    cols: ['Penyulang', 'Nama_Segmen', 'Line_ID', 'Berawal_Dari', 'Tiang_Awal', 'Tiang_Akhir', 'Jumlah_Tiang', 'Panjang_m'],
+                    rows: lines.filter(l => l.jenis === 'JTM').map(l => ({
+                        Penyulang: l.sample.Penyulang,
+                        Nama_Segmen: l.Nama_Segmen,
+                        Line_ID: l.Line_ID,
+                        Berawal_Dari: l.Berawal_Dari,
+                        Tiang_Awal: l.vertices[0].id,
+                        Tiang_Akhir: l.vertices[l.vertices.length - 1].id,
+                        Jumlah_Tiang: l.count,
+                        Panjang_m: round1(l.length)
+                    }))
+                },
+                {
+                    // 1 segmen JTR = 1 gawang (antara 2 titik), nama "Tiang1 - Tiang2"
+                    name: 'Segmen JTR (Gawang)',
+                    cols: ['No', 'Nama_Segmen', 'Gardu_Sumber', 'Jurusan', 'Jalur', 'Line_ID', 'Dari_Titik', 'Ke_Titik', 'Seq_Dari', 'Seq_Ke', 'Lat_Dari', 'Lon_Dari', 'Lat_Ke', 'Lon_Ke', 'Panjang_m'],
+                    rows: buildSpans('JTR').map((s, i) => ({
+                        No: i + 1,
+                        Nama_Segmen: s.name,
+                        Gardu_Sumber: s.line.sample.Gardu_Sumber,
+                        Jurusan: s.line.sample.Jurusan,
+                        Jalur: s.line.Nama_Segmen,
+                        Line_ID: s.line.Line_ID,
+                        Dari_Titik: s.from.id,
+                        Ke_Titik: s.to.id,
+                        Seq_Dari: s.from.pole.Seq_No,
+                        Seq_Ke: s.to.pole.Seq_No,
+                        Lat_Dari: s.from.pole.Latitude,
+                        Lon_Dari: s.from.pole.Longitude,
+                        Lat_Ke: s.to.pole.Latitude,
+                        Lon_Ke: s.to.pole.Longitude,
+                        Panjang_m: round1(s.length)
+                    }))
+                },
+                {
+                    // Siap untuk ArcGIS "Points To Line": Line Field = Line_ID, Sort Field = Urutan_Vertex.
+                    // Sudah termasuk titik awal segmen (gardu / tiang percabangan) agar cabang tersambung.
+                    name: 'Vertex Garis',
+                    cols: ['Jenis', 'Line_ID', 'Nama_Segmen', 'Urutan_Vertex', 'ID_Titik', 'Seq_No', 'Latitude', 'Longitude'],
+                    rows: lines.flatMap(line => line.vertices.map((v, i) => ({
+                        Jenis: line.jenis,
+                        Line_ID: line.Line_ID,
+                        Nama_Segmen: line.Nama_Segmen,
+                        Urutan_Vertex: i + 1,
+                        ID_Titik: v.id,
+                        Seq_No: v.pole.Seq_No,
+                        Latitude: v.pole.Latitude,
+                        Longitude: v.pole.Longitude
+                    })))
+                }
+            ];
+
+            const workbook = new ExcelJS.Workbook();
+            workbook.created = new Date();
+
+            // Ukuran asli gambar (untuk menjaga rasio di Excel)
+            const imageSize = dataUrl => new Promise(resolve => {
+                const img = new Image();
+                img.onload = () => resolve({ w: img.naturalWidth || 16, h: img.naturalHeight || 9 });
+                img.onerror = () => resolve({ w: 16, h: 9 });
+                img.src = dataUrl;
+            });
+            // Satu gambar didaftarkan sekali saja walau dipakai di beberapa sheet (file tetap ringan)
+            const imageCache = new Map();
+            const getImage = async dataUrl => {
+                if (!imageCache.has(dataUrl)) {
+                    const dim = await imageSize(dataUrl);
+                    const id = workbook.addImage({ base64: dataUrl, extension: dataUrl.startsWith('data:image/png') ? 'png' : 'jpeg' });
+                    imageCache.set(dataUrl, { id, ...dim });
+                }
+                return imageCache.get(dataUrl);
+            };
+
+            for (const sheet of sheets) {
+                if (sheet.rows.length === 0) continue;
+                const ws = workbook.addWorksheet(sheet.name);
+                ws.columns = sheet.cols.map(c => ({
+                    header: c,
+                    key: c,
+                    width: c === 'Gambar' ? Math.ceil(EXCEL_IMG_W / 7) + 1 : Math.max(10, Math.min(28, c.length + 4))
+                }));
+                ws.getRow(1).font = { bold: true };
+                ws.views = [{ state: 'frozen', ySplit: 1 }];
+
+                const fotoCol = sheet.cols.indexOf('Gambar');
+                for (const r of sheet.rows) {
+                    const row = ws.addRow(r);
+                    if (fotoCol < 0 || !r.__foto) continue;
+                    const img = await getImage(r.__foto);
+                    const h = Math.max(1, Math.round(EXCEL_IMG_W * img.h / img.w));
+                    row.height = h * 0.75 + 4;                 // tinggi baris dalam point (1 px ≈ 0.75 pt)
+                    row.alignment = { vertical: 'top' };
+                    ws.addImage(img.id, {
+                        tl: { col: fotoCol + 0.05, row: row.number - 1 + 0.05 },
+                        ext: { width: EXCEL_IMG_W, height: h },
+                        editAs: 'oneCell'
+                    });
+                }
+            }
+
+            const buffer = await workbook.xlsx.writeBuffer();
+            const blob = new Blob([buffer], { type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' });
+            const a = document.createElement('a');
+            a.href = URL.createObjectURL(blob);
+            a.download = "Hasil_Survei_Aset_360_ArcGIS.xlsx";
+            document.body.appendChild(a);
+            a.click();
+            a.remove();
+            setTimeout(() => URL.revokeObjectURL(a.href), 2000);
+        }
+    </script>
+</body>
+</html>
